@@ -1,0 +1,9 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="4. add_photos" type="PythonConfigurationType" factoryName="Python">
+    <module name="clip_zero_shot_search" />
+    <option name="SCRIPT_NAME" value="$PROJECT_DIR$/src/clip_zero_shot_search.py" />
+    <option name="PARAMETERS" value="add --images_dir data/new_photos --index_dir index" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+    <method v="2" />
+  </configuration>
+</component>

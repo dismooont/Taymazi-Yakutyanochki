@@ -1,0 +1,27 @@
+# Данные и результаты (большие, не хранить в git)
+data/images/*
+!data/images/.gitkeep
+data/annotations/
+data/captions.csv
+data/user_photos/
+index/*
+!index/.gitkeep
+
+# Секреты (Telegram-бот)
+.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# PyCharm
+.idea/workspace.xml
+.idea/tasks.xml
+.idea/shelf/
+
+# Прочее
+.DS_Store
+*.log

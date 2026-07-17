@@ -1,0 +1,16 @@
+# Зависимости Telegram-бота (образ Docker). torch ставится отдельно (CPU-only)
+# в Dockerfile, поэтому здесь его нет — иначе подтянется тяжёлая CUDA-сборка.
+
+aiogram>=3.10,<4.0
+aiohttp-socks>=0.8            # нужен aiogram для доступа к Telegram через прокси (TELEGRAM_PROXY)
+python-dotenv>=1.0
+
+transformers>=4.40,<5.0    # см. README: раздел "Известные проблемы" про transformers 5.x
+faiss-cpu>=1.7.4
+pillow>=10.0
+pandas>=2.0
+numpy>=1.24
+tqdm>=4.65
+
+# Перевод текстовых запросов RU->EN
+deep-translator>=1.11

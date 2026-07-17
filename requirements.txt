@@ -1,0 +1,12 @@
+# Основные зависимости
+torch>=2.1
+transformers>=4.40,<5.0    # см. README: раздел "Известные проблемы" про transformers 5.x
+faiss-cpu>=1.7.4
+pillow>=10.0
+pandas>=2.0
+numpy>=1.24
+tqdm>=4.65
+matplotlib>=3.7
+
+# Опционально — перевод текстовых запросов RU->EN
+deep-translator>=1.11

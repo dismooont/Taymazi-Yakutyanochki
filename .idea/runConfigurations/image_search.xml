@@ -1,0 +1,9 @@
+<component name="ProjectRunConfigurationManager">
+  <configuration default="false" name="3. image_search" type="PythonConfigurationType" factoryName="Python">
+    <module name="clip_zero_shot_search" />
+    <option name="SCRIPT_NAME" value="$PROJECT_DIR$/src/clip_zero_shot_search.py" />
+    <option name="PARAMETERS" value="image --index_dir index --image_path query.jpg --top_k 5" />
+    <option name="WORKING_DIRECTORY" value="$PROJECT_DIR$" />
+    <method v="2" />
+  </configuration>
+</component>
