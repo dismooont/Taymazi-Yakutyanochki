@@ -30,6 +30,7 @@ from __future__ import annotations
 
 import asyncio
 import io
+import logging
 import os
 import sys
 from pathlib import Path
@@ -55,6 +56,26 @@ except ImportError:
 
 TOP_K = int(os.environ.get("BOT_TOP_K", "5"))
 PRIVATE = {"private"}
+
+# Без лога бот — чёрный ящик: на жалобу «не отвечает» смотреть было бы нечего.
+# Пишем, что пришло и чем закончилось, но без текста запросов и без содержимого
+# чатов: в логе не должно оседать то, что люди присылают друг другу.
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(message)s",
+    datefmt="%H:%M:%S",
+)
+# httpx на уровне INFO пишет строку на каждый запрос к API и топит в шуме
+# собственные записи бота — оставляем от него только предупреждения.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+
+log = logging.getLogger("bot")
+
+
+def _where(message: Message) -> str:
+    """Куда отвечаем — тип чата и его id, без названия и участников."""
+    return f"{message.chat.type}:{message.chat.id}"
+
 
 HELP = (
     "🔎 <b>Поиск по фотографиям чата</b>\n\n"
@@ -85,8 +106,11 @@ def build_dispatcher(api: SearchApi) -> Dispatcher:
         try:
             chat = await api.start_chat(message.chat.id, user_id, name, title)
         except ApiError as e:
+            log.warning("/start %s -> отказ: %s", _where(message), e.detail)
             await message.answer(f"Не получилось: {e.detail}")
             return
+        log.info("/start %s -> база %s, создана=%s",
+                 _where(message), chat["database_id"][:8], chat["created"])
 
         if chat["created"]:
             where = "этого чата" if message.chat.type not in PRIVATE else "вашего архива"
@@ -134,10 +158,13 @@ def build_dispatcher(api: SearchApi) -> Dispatcher:
                 message.chat.id, f"{photo.file_unique_id}.jpg", buffer.getvalue(), user_id, name
             )
         except ApiError as e:
+            log.warning("фото %s -> отказ: %s", _where(message), e.detail)
             # в группе о каждой неудаче не сообщаем, чтобы не засорять чат
             if message.chat.type in PRIVATE:
                 await message.reply(f"Не добавил: {e.detail}")
             return
+        log.info("фото %s -> добавлено=%s, всего=%s",
+                 _where(message), result["added"], result["photos_count"])
 
         if message.chat.type in PRIVATE:
             if result["added"]:
@@ -170,8 +197,12 @@ def build_dispatcher(api: SearchApi) -> Dispatcher:
         try:
             found = await api.search(message.chat.id, query, TOP_K)
         except ApiError as e:
+            log.warning("поиск %s -> отказ: %s", _where(message), e.detail)
             await message.answer(f"Поиск не удался: {e.detail}")
             return
+        # длину запроса пишем, сам запрос — нет: это личные данные
+        log.info("поиск %s -> %s символов, найдено %s",
+                 _where(message), len(query), len(found["results"]))
 
         hits = found["results"]
         if not hits:
@@ -212,7 +243,7 @@ async def main() -> None:
         default=DefaultBotProperties(parse_mode="HTML"),
     )
 
-    print(f"Бот запущен, API: {api_url}")
+    log.info("Бот запущен, API: %s", api_url)
     try:
         await build_dispatcher(api).start_polling(bot)
     finally:
