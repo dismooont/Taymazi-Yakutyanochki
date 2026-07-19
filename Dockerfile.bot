@@ -1,0 +1,24 @@
+# Telegram-бот: тонкий HTTP-клиент API.
+#
+# Здесь нет ни torch, ни faiss, ни весов CLIP — бот их не использует. Образ выходит
+# около 150 МБ вместо двух гигабайт, а модель в системе существует ровно в одном
+# экземпляре, в API-процессе.
+FROM python:3.11-slim
+
+WORKDIR /app
+
+ARG HTTP_PROXY=""
+ARG HTTPS_PROXY=""
+ENV HTTP_PROXY=${HTTP_PROXY} HTTPS_PROXY=${HTTPS_PROXY} \
+    http_proxy=${HTTP_PROXY} https_proxy=${HTTPS_PROXY}
+
+COPY bot/requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY bot/ bot/
+
+ENV HTTP_PROXY="" HTTPS_PROXY="" http_proxy="" https_proxy="" \
+    PYTHONUNBUFFERED=1 \
+    API_URL=http://web:8000
+
+CMD ["python", "-m", "bot.bot"]

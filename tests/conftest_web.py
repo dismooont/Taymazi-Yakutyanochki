@@ -19,15 +19,18 @@ def app_env(tmp_path, monkeypatch, holder):
     """Изолированное окружение: своя папка данных и своя SQLite на каждый тест."""
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("REGISTRATION_OPEN", "1")
-    monkeypatch.setenv("PUBLIC_URL", "http://localhost:5173")
     monkeypatch.setenv("MIN_PASSWORD_LENGTH", "10")
     # Демо-база подключается, только если указанный индекс существует. В тестах путь
     # заведомо пустой: иначе настоящий индекс COCO из index/ подмешивался бы в списки
     # баз и ломал проверки, а тесты зависели бы от машины, на которой запущены.
     monkeypatch.setenv("DEMO_INDEX_DIR", str(tmp_path / "no-demo"))
-    # Бот живёт в том же процессе. Без этого тесты, задающие токен, полезли бы
-    # в настоящий Telegram.
-    monkeypatch.setenv("TELEGRAM_BOT_ENABLED", "0")
+    # Приложение читает .env при запуске, поэтому настройки разработчика могли бы
+    # протечь в тесты: с настоящим SERVICE_TOKEN в .env проверка «ручек бота нет,
+    # пока токен не задан» проходила бы на чужой машине и падала на этой.
+    for leaking in ("SERVICE_TOKEN", "TELEGRAM_BOT_TOKEN", "TELEGRAM_BOT_USERNAME",
+                    "TELEGRAM_AUTH_ENABLED", "TELEGRAM_PROXY", "PUBLIC_URL"):
+        monkeypatch.delenv(leaking, raising=False)
+    monkeypatch.setenv("PUBLIC_URL", "http://localhost:5173")
     reset_settings()
     login_limiter.clear()
     register_limiter.clear()

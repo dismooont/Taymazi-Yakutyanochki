@@ -19,6 +19,7 @@ from web import db
 from web.archive import ArchiveError, ArchiveLimits, extract_images, inspect
 from web.config import get_settings
 from web.deps import OwnedDatabase, WritableDatabase
+from web import services
 from web.jobs import JobContext, job_queue
 from web.schemas import AddPhotosOut, DeletePhotosRequest, PhotoOut, PhotoPageOut
 from web.stores import database_root, store_for, sync_stats
@@ -27,7 +28,6 @@ router = APIRouter(prefix="/api/databases/{database_id}", tags=["photos"])
 
 # До этого числа файлов включительно работаем синхронно: ждать поллинга ради одного
 # снимка — хуже, чем подождать секунду ответа.
-SYNC_UPLOAD_LIMIT = 3
 MAX_UPLOAD_FILES = 500
 UPLOAD_CHUNK = 1 << 20
 
@@ -36,40 +36,8 @@ UPLOAD_CHUNK = 1 << 20
 # Вспомогательное
 # --------------------------------------------------------------------------
 
-def _limits_for(user_id: str) -> ArchiveLimits:
-    """Лимит на архив — это остаток дисковой квоты пользователя, а не отдельное число."""
-    settings = get_settings()
-    remaining = max(0, settings.max_bytes_per_user - db.user_total_bytes(user_id))
-    return ArchiveLimits(max_total_bytes=remaining)
 
 
-def _check_room(database: dict, incoming: int) -> None:
-    settings = get_settings()
-    if database["photos_count"] + incoming > settings.max_photos_per_db:
-        raise HTTPException(
-            status.HTTP_409_CONFLICT,
-            f"В базе не более {settings.max_photos_per_db} фото "
-            f"(сейчас {database['photos_count']})",
-        )
-    if db.user_total_bytes(database["user_id"]) >= settings.max_bytes_per_user:
-        raise HTTPException(status.HTTP_409_CONFLICT, "Достигнут лимит объёма")
-
-
-def _require_idle(database: dict) -> None:
-    """
-    Две одновременные операции над одной базой не имеют смысла: они всё равно
-    выстроятся в очередь, но пользователь увидит два конкурирующих прогресс-бара.
-    """
-    if db.has_active_job(database["id"]):
-        raise HTTPException(
-            status.HTTP_409_CONFLICT, "База уже обрабатывается, дождитесь окончания"
-        )
-
-
-def _tmp_dir(database: dict, name: str) -> Path:
-    root = get_settings().database_dir(database["user_id"], database["id"]) / "tmp" / name
-    root.mkdir(parents=True, exist_ok=True)
-    return root
 
 
 def _save_upload(upload: UploadFile, target: Path, max_bytes: int) -> int:
@@ -90,21 +58,6 @@ def _save_upload(upload: UploadFile, target: Path, max_bytes: int) -> int:
             out.write(chunk)
     return written
 
-
-def _index_files(store: IndexStore, files: list[Path], context: JobContext | None,
-                 names: dict[str, str] | None = None) -> dict:
-    """
-    names — соответствие «имя во временной папке -> имя, которое дал файлу пользователь».
-    Во временной папке имена снабжены порядковым префиксом (чтобы два файла с одинаковым
-    именем не затёрли друг друга), но показывать этот префикс в списке пропущенных нельзя:
-    пользователь не найдёт у себя «0001_photo.jpg».
-    """
-    result = store.add_photos(
-        files,
-        on_progress=(context.progress if context else None),
-    )
-    skipped = [((names or {}).get(name, name), reason) for name, reason in result.skipped]
-    return {"added": result.added_count, "skipped": skipped}
 
 
 # --------------------------------------------------------------------------
@@ -190,11 +143,11 @@ def add_photos(database: WritableDatabase, files: list[UploadFile] = File(...)) 
             status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
             f"За раз не больше {MAX_UPLOAD_FILES} файлов",
         )
-    _require_idle(database)
-    _check_room(database, len(files))
+    services.require_idle(database)
+    services.check_room(database, len(files))
 
-    limits = _limits_for(database["user_id"])
-    staging = _tmp_dir(database, f"upload-{db.new_id()}")
+    limits = services.limits_for(database["user_id"])
+    staging = services.tmp_dir(database, f"upload-{db.new_id()}")
     saved: list[Path] = []
     names: dict[str, str] = {}
     try:
@@ -208,35 +161,10 @@ def add_photos(database: WritableDatabase, files: list[UploadFile] = File(...)) 
         shutil.rmtree(staging, ignore_errors=True)
         raise
 
-    if len(saved) <= SYNC_UPLOAD_LIMIT:
-        try:
-            store = store_for(database)
-            outcome = _index_files(store, saved, None, names)
-            sync_stats(database["id"], store)
-        finally:
-            shutil.rmtree(staging, ignore_errors=True)
-        return AddPhotosOut(added=outcome["added"], skipped=outcome["skipped"])
-
-    def task(context: JobContext) -> str:
-        try:
-            store = store_for(database)
-            outcome = _index_files(store, saved, context, names)
-            return f"Добавлено фото: {outcome['added']}, пропущено: {len(outcome['skipped'])}"
-        finally:
-            # папку чистим и при отмене, и при ошибке: временные файлы уже скопированы
-            # внутрь базы, второй экземпляр никому не нужен
-            shutil.rmtree(staging, ignore_errors=True)
-            store = store_for(database)
-            sync_stats(database["id"], store)
-
-    job = job_queue.submit(
-        kind="add_photos",
-        user_id=database["user_id"],
-        database_id=database["id"],
-        function=task,
-        total=len(saved),
-    )
-    return AddPhotosOut(job_id=job["id"])
+    # дальше — общая для сайта и бота логика: мало файлов обрабатываем сразу,
+    # много отправляем в очередь
+    outcome = services.add_photo_paths(database, saved, staging, names)
+    return AddPhotosOut(**outcome)
 
 
 # --------------------------------------------------------------------------
@@ -245,12 +173,12 @@ def add_photos(database: WritableDatabase, files: list[UploadFile] = File(...)) 
 
 @router.post("/import", response_model=AddPhotosOut, status_code=status.HTTP_202_ACCEPTED)
 def import_archive(database: WritableDatabase, file: UploadFile = File(...)) -> AddPhotosOut:
-    _require_idle(database)
-    limits = _limits_for(database["user_id"])
+    services.require_idle(database)
+    limits = services.limits_for(database["user_id"])
     if limits.max_total_bytes == 0:
         raise HTTPException(status.HTTP_409_CONFLICT, "Достигнут лимит объёма")
 
-    staging = _tmp_dir(database, f"import-{db.new_id()}")
+    staging = services.tmp_dir(database, f"import-{db.new_id()}")
     archive_path = staging / "upload.zip"
     try:
         _save_upload(file, archive_path, limits.max_total_bytes)
@@ -265,7 +193,7 @@ def import_archive(database: WritableDatabase, file: UploadFile = File(...)) -> 
         raise
 
     try:
-        _check_room(database, count)
+        services.check_room(database, count)
     except HTTPException:
         shutil.rmtree(staging, ignore_errors=True)
         raise
@@ -278,7 +206,7 @@ def import_archive(database: WritableDatabase, file: UploadFile = File(...)) -> 
 
             context.set_message("Индексация")
             store = store_for(database)
-            outcome = _index_files(store, extracted.files, context)
+            outcome = services.index_files(store, extracted.files, context)
             skipped = len(outcome["skipped"]) + len(extracted.skipped)
             return f"Добавлено фото: {outcome['added']}, пропущено: {skipped}"
         finally:

@@ -12,6 +12,16 @@ from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
+# В Docker переменные приходят через env_file, а при локальном запуске их неоткуда
+# взять: без этого всё, что описано в .env.example, молча не применялось бы —
+# uvicorn просто не знает про .env.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(PROJECT_ROOT / ".env")
+except ImportError:
+    pass
+
 
 def _flag(name: str, default: bool) -> bool:
     raw = os.environ.get(name)
@@ -43,7 +53,7 @@ class Settings:
     telegram_bot_token: str
     telegram_bot_username: str
     telegram_proxy: str
-    telegram_bot_enabled: bool
+    service_token: str
 
     @property
     def db_path(self) -> Path:
@@ -111,9 +121,9 @@ def get_settings() -> Settings:
         # Имя бота нужно фронтенду, чтобы отрисовать виджет входа.
         telegram_bot_username=os.environ.get("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@"),
         telegram_proxy=os.environ.get("TELEGRAM_PROXY", "").strip(),
-        # Бот работает внутри этого же процесса. Выключается отдельно от входа через
-        # Telegram: вход может быть нужен без бота, а бот — без входа.
-        telegram_bot_enabled=_flag("TELEGRAM_BOT_ENABLED", True),
+        # Токен, которым Telegram-бот доказывает API, что он свой. Пока не задан,
+        # ручки /api/bot не существует вовсе — так безопаснее умолчания.
+        service_token=os.environ.get("SERVICE_TOKEN", "").strip(),
     )
 
 

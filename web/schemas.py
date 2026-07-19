@@ -169,6 +169,42 @@ class JobOut(BaseModel):
         )
 
 
+class BotChatOut(BaseModel):
+    """Состояние базы чата в том виде, в каком её показывает бот."""
+
+    database_id: str
+    name: str
+    photos_count: int
+    total_bytes: int
+    created: bool = False
+    added: int = 0
+    skipped: list[tuple[str, str]] = Field(default_factory=list)
+
+    @classmethod
+    def from_row(cls, row: dict, *, created: bool = False, added: int = 0,
+                 skipped: list | None = None) -> "BotChatOut":
+        return cls(
+            database_id=row["id"],
+            name=row["name"],
+            photos_count=row["photos_count"],
+            total_bytes=row["photos_bytes"] + row["index_bytes"],
+            created=created,
+            added=added,
+            skipped=skipped or [],
+        )
+
+
+class BotSearchRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=500)
+    top_k: int = Field(default=5, ge=1, le=20)
+    translate: bool = True
+
+
+class BotSearchResultOut(BaseModel):
+    used_query: str
+    results: list[SearchHitOut] = Field(default_factory=list)
+
+
 class QuotaOut(BaseModel):
     """Лимиты и текущее потребление — фронт показывает их рядом с объёмом базы."""
 

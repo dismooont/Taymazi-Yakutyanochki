@@ -1,16 +1,11 @@
-# Зависимости Telegram-бота (образ Docker). torch ставится отдельно (CPU-only)
-# в Dockerfile, поэтому здесь его нет — иначе подтянется тяжёлая CUDA-сборка.
+# Зависимости Telegram-бота.
+#
+# Ни torch, ни transformers, ни faiss здесь нет и быть не должно: бот не считает
+# эмбеддинги и не открывает индекс — он обращается к API по HTTP (bot/client.py).
+# Поэтому образ бота весит около 150 МБ вместо двух гигабайт, а модель CLIP
+# существует в системе ровно в одном экземпляре — в API-процессе.
 
 aiogram>=3.10,<4.0
-aiohttp-socks>=0.8            # нужен aiogram для доступа к Telegram через прокси (TELEGRAM_PROXY)
+aiohttp-socks>=0.8         # нужен aiogram для доступа к Telegram через прокси (TELEGRAM_PROXY)
+httpx>=0.27                # клиент API
 python-dotenv>=1.0
-
-transformers>=4.40,<5.0    # см. README: раздел "Известные проблемы" про transformers 5.x
-faiss-cpu>=1.7.4
-pillow>=10.0
-pandas>=2.0
-numpy>=1.24
-tqdm>=4.65
-
-# Перевод текстовых запросов RU->EN
-deep-translator>=1.11

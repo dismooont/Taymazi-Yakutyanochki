@@ -19,7 +19,7 @@ from fastapi.responses import JSONResponse
 from web import db
 from web.config import get_settings
 from web.jobs import job_queue, recover_interrupted_jobs
-from web.routers import auth, databases, export, jobs, photos, search
+from web.routers import auth, bot, databases, export, jobs, photos, search
 
 # Мутирующие запросы обязаны нести этот заголовок. Простую HTML-форму с чужого сайта
 # так не подделать: заголовок требует XHR/fetch, а на них распространяется CORS.
@@ -27,6 +27,10 @@ from web.routers import auth, databases, export, jobs, photos, search
 CSRF_HEADER = "x-requested-with"
 SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 CSRF_EXEMPT_PATHS = {"/api/health"}
+# Ручки бота не браузерные и авторизуются служебным токеном, а не cookie. CSRF —
+# это атака на cookie-авторизацию, здесь её просто нет, поэтому требовать заголовок
+# незачем: он лишь заставил бы клиента слать бессмысленную строку.
+CSRF_EXEMPT_PREFIXES = ("/api/bot/",)
 
 
 def _preload_model() -> None:
@@ -78,20 +82,6 @@ def _register_demo_database() -> None:
         print(f"[демо-база не подключена] {e}")
 
 
-def _start_bot():
-    """Запускает Telegram-бота фоновой задачей, если он настроен."""
-    settings = get_settings()
-    if not (settings.telegram_bot_enabled and settings.telegram_bot_token):
-        return None, None
-
-    import asyncio
-
-    from web.telegram_bot import run_bot
-
-    stop = asyncio.Event()
-    print("Telegram-бот запущен (long polling)")
-    return asyncio.create_task(run_bot(stop)), stop
-
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -109,17 +99,18 @@ async def lifespan(app: FastAPI):
     job_queue.start()
     _register_demo_database()
 
-    bot_task, bot_stop = _start_bot()
+    print(f"Данные: {settings.data_dir} | регистрация: "
+          f"{'открыта' if settings.registration_open else 'закрыта'} | "
+          f"Telegram-вход: {'вкл' if settings.telegram_auth_enabled else 'выкл'} | "
+          f"ручки бота: {'вкл' if settings.service_token else 'выкл (нет SERVICE_TOKEN)'}")
+
+    # Telegram-бот работает отдельным процессом и ходит сюда по HTTP
+    # (web/routers/bot.py). В одном процессе с API он жить не должен: падение
+    # обработчика бота не имеет права трогать сайт.
     try:
         yield
     finally:
-        if bot_task is not None:
-            bot_stop.set()
-            await bot_task
         job_queue.stop()
-    print(f"Данные: {settings.data_dir} | регистрация: "
-          f"{'открыта' if settings.registration_open else 'закрыта'} | "
-          f"Telegram-вход: {'вкл' if settings.telegram_auth_enabled else 'выкл'}")
 
 
 def create_app() -> FastAPI:
@@ -139,7 +130,9 @@ def create_app() -> FastAPI:
 
     @app.middleware("http")
     async def require_csrf_header(request: Request, call_next):
-        if request.method not in SAFE_METHODS and request.url.path not in CSRF_EXEMPT_PATHS:
+        path = request.url.path
+        exempt = path in CSRF_EXEMPT_PATHS or path.startswith(CSRF_EXEMPT_PREFIXES)
+        if request.method not in SAFE_METHODS and not exempt:
             if CSRF_HEADER not in request.headers:
                 return JSONResponse(
                     status_code=status.HTTP_403_FORBIDDEN,
@@ -155,6 +148,7 @@ def create_app() -> FastAPI:
     app.include_router(search.router)
     app.include_router(export.router)
     app.include_router(jobs.router)
+    app.include_router(bot.router)
 
     @app.get("/api/health", tags=["service"])
     def health() -> dict:

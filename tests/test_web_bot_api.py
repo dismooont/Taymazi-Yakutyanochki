@@ -1,0 +1,237 @@
+"""
+Тесты ручек, которыми пользуется Telegram-бот.
+
+Бот — доверенный внутренний клиент: он сообщает, от чьего имени действует, и API
+ему верит. Поэтому проверок здесь две группы: что без служебного токена внутрь не
+попасть вовсе и что действия бота подчиняются тем же правилам, что и действия
+с сайта — квотам, запрету на изменение демо-базы, учёту участников чата.
+"""
+
+from __future__ import annotations
+
+import io
+
+import pytest
+from PIL import Image
+
+from web import db
+from web.config import reset_settings
+
+TOKEN = "sluzhebnyy-token-dlya-testov-0123456789"
+CHAT = "-100777"
+
+
+def _jpeg(color=(120, 80, 200)) -> bytes:
+    buffer = io.BytesIO()
+    Image.new("RGB", (48, 48), color).save(buffer, "JPEG")
+    return buffer.getvalue()
+
+
+@pytest.fixture
+def bot_client(raw_client, app_env):
+    """Клиент со служебным токеном — то, чем пользуется процесс бота."""
+    app_env.setenv("SERVICE_TOKEN", TOKEN)
+    reset_settings()
+    raw_client.headers["X-Service-Token"] = TOKEN
+    return raw_client
+
+
+@pytest.fixture
+def started_chat(bot_client):
+    response = bot_client.post(
+        f"/api/bot/chats/{CHAT}/start",
+        data={"telegram_user_id": "555", "display_name": "Иван", "title": "Поход"},
+    )
+    assert response.status_code == 200, response.text
+    return response.json()
+
+
+# --------------------------------------------------------------------------
+# Служебный токен
+# --------------------------------------------------------------------------
+
+def test_without_token_no_access(raw_client, app_env):
+    app_env.setenv("SERVICE_TOKEN", TOKEN)
+    reset_settings()
+
+    response = raw_client.post(
+        f"/api/bot/chats/{CHAT}/start", data={"telegram_user_id": "555"}
+    )
+
+    assert response.status_code == 401
+
+
+def test_wrong_token_rejected(raw_client, app_env):
+    app_env.setenv("SERVICE_TOKEN", TOKEN)
+    reset_settings()
+
+    response = raw_client.post(
+        f"/api/bot/chats/{CHAT}/start",
+        data={"telegram_user_id": "555"},
+        headers={"X-Service-Token": "ne-tot-token"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_endpoints_absent_until_token_configured(raw_client):
+    """Пока SERVICE_TOKEN не задан, ручек бота как будто нет — так безопаснее умолчания."""
+    response = raw_client.post(
+        f"/api/bot/chats/{CHAT}/start",
+        data={"telegram_user_id": "555"},
+        headers={"X-Service-Token": "chto-ugodno"},
+    )
+
+    assert response.status_code == 404
+
+
+def test_bot_requests_need_no_csrf_header(bot_client, started_chat):
+    """
+    Бот не браузер и авторизуется токеном, а не cookie: требовать X-Requested-With
+    у него означало бы заставлять слать бессмысленную строку.
+    """
+    assert "X-Requested-With" not in bot_client.headers
+    assert started_chat["photos_count"] == 0
+
+
+# --------------------------------------------------------------------------
+# Чат и его база
+# --------------------------------------------------------------------------
+
+def test_start_creates_database_once(bot_client, started_chat):
+    assert started_chat["created"] is True
+    assert started_chat["name"] == "Поход"
+
+    again = bot_client.post(
+        f"/api/bot/chats/{CHAT}/start",
+        data={"telegram_user_id": "555", "display_name": "Иван", "title": "Поход"},
+    ).json()
+
+    assert again["created"] is False
+    assert again["database_id"] == started_chat["database_id"]
+
+
+def test_chat_without_start_is_unknown(bot_client):
+    assert bot_client.get("/api/bot/chats/-100999").status_code == 404
+
+
+def test_start_creates_account_linked_to_telegram(bot_client, started_chat):
+    """
+    Аккаунт из чата — тот же, в который человек попадёт, войдя на сайт через
+    Telegram: иначе снимки из бота не нашлись бы в веб-интерфейсе.
+    """
+    user = db.get_user_by_identity("telegram", "555")
+
+    assert user is not None
+    assert user["display_name"] == "Иван"
+    assert db.get_chat_member(CHAT, user["id"]) is not None
+
+
+def test_member_recorded_on_message(bot_client, started_chat):
+    bot_client.post(
+        f"/api/bot/chats/{CHAT}/members",
+        data={"telegram_user_id": "666", "display_name": "Пётр"},
+    )
+
+    petr = db.get_user_by_identity("telegram", "666")
+    assert db.get_chat_member(CHAT, petr["id"]) is not None
+
+
+# --------------------------------------------------------------------------
+# Фотографии и поиск
+# --------------------------------------------------------------------------
+
+def test_add_photo_and_search(bot_client, started_chat):
+    added = bot_client.post(
+        f"/api/bot/chats/{CHAT}/photos",
+        files={"file": ("a.jpg", _jpeg(), "image/jpeg")},
+        data={"telegram_user_id": "555", "display_name": "Иван"},
+    )
+
+    assert added.status_code == 200
+    assert added.json()["added"] == 1
+    assert added.json()["photos_count"] == 1
+
+    found = bot_client.post(
+        f"/api/bot/chats/{CHAT}/search", json={"query": "cat", "top_k": 3, "translate": False}
+    ).json()
+
+    assert len(found["results"]) == 1
+    photo_id = found["results"][0]["photo_id"]
+    file_response = bot_client.get(f"/api/bot/chats/{CHAT}/photos/{photo_id}/file")
+    assert file_response.status_code == 200
+    assert len(file_response.content) > 0
+
+
+def test_duplicate_photo_reported_as_skipped(bot_client, started_chat):
+    photo = _jpeg((7, 7, 7))
+    payload = {"file": ("a.jpg", photo, "image/jpeg")}
+    bot_client.post(f"/api/bot/chats/{CHAT}/photos", files=payload)
+
+    again = bot_client.post(
+        f"/api/bot/chats/{CHAT}/photos", files={"file": ("b.jpg", photo, "image/jpeg")}
+    ).json()
+
+    assert again["added"] == 0
+    assert again["skipped"][0][1] == "уже есть в базе"
+
+
+def test_photo_quota_applies_to_bot(bot_client, started_chat, app_env):
+    """Ключевая причина ходить через API: правила одни и те же у бота и у сайта."""
+    app_env.setenv("MAX_PHOTOS_PER_DB", "1")
+    reset_settings()
+
+    bot_client.post(f"/api/bot/chats/{CHAT}/photos", files={"file": ("a.jpg", _jpeg((1, 2, 3)), "image/jpeg")})
+    second = bot_client.post(
+        f"/api/bot/chats/{CHAT}/photos", files={"file": ("b.jpg", _jpeg((9, 9, 9)), "image/jpeg")}
+    )
+
+    assert second.status_code == 409
+    assert "не более 1 фото" in second.json()["detail"]
+
+
+def test_search_without_database(bot_client):
+    response = bot_client.post(
+        "/api/bot/chats/-100999/search", json={"query": "cat", "translate": False}
+    )
+    assert response.status_code == 404
+
+
+# --------------------------------------------------------------------------
+# Связь с веб-интерфейсом
+# --------------------------------------------------------------------------
+
+def test_photos_from_bot_visible_on_site(bot_client, started_chat, client, app_env):
+    """
+    Снимок, присланный в чат, должен находиться в веб-интерфейсе тем же человеком:
+    ради этого бот и сайт работают с одной базой через один API.
+    """
+    bot_client.post(
+        f"/api/bot/chats/{CHAT}/photos",
+        files={"file": ("a.jpg", _jpeg((40, 90, 140)), "image/jpeg")},
+        data={"telegram_user_id": "555", "display_name": "Иван"},
+    )
+
+    # тот же человек входит на сайте через Telegram.
+    # Настройки правим только через app_env: os.environ напрямую пережил бы тест
+    # и сломал следующий (именно так и случилось при первом прогоне).
+    from tests.test_web_telegram import BOT_TOKEN, widget_payload
+
+    app_env.setenv("TELEGRAM_AUTH_ENABLED", "1")
+    app_env.setenv("TELEGRAM_BOT_TOKEN", BOT_TOKEN)
+    app_env.setenv("TELEGRAM_BOT_USERNAME", "test_search_bot")
+    reset_settings()
+
+    client.headers["X-Requested-With"] = "XMLHttpRequest"
+    entered = client.post("/api/auth/telegram", json=widget_payload("555"))
+    assert entered.status_code == 200
+
+    listed = client.get("/api/databases").json()
+    chat_base = next(item for item in listed if item["id"] == started_chat["database_id"])
+    assert chat_base["photos_count"] == 1
+
+    found = client.post(
+        f"/api/databases/{chat_base['id']}/search/text",
+        json={"query": "cat", "translate": False},
+    ).json()
+    assert len(found["results"]) == 1
