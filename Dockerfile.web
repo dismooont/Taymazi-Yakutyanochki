@@ -12,6 +12,12 @@ ENV HTTP_PROXY=${HTTP_PROXY} HTTPS_PROXY=${HTTPS_PROXY} \
     http_proxy=${HTTP_PROXY} https_proxy=${HTTPS_PROXY}
 
 # torch CPU-only сборка — образ в разы легче, чем с CUDA-зависимостями.
+#
+# Увеличенные таймаут и число попыток обязательны: колесо torch весит около 200 МБ,
+# и на медленном или нестабильном канале установка по умолчанию обрывается
+# на ReadTimeoutError, роняя всю сборку с самого начала.
+ENV PIP_DEFAULT_TIMEOUT=180 PIP_RETRIES=10
+
 RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
 
 COPY requirements-web.txt .

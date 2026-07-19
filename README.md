@@ -77,7 +77,7 @@ clip_zero_shot_search/
 ├── bot/                            # Telegram-бот: тонкий HTTP-клиент API (раздел 9.4)
 │   ├── bot.py                      # обработчики aiogram, long polling
 │   ├── client.py                   # клиент API (ни torch, ни faiss здесь нет)
-│   └── requirements.txt            # aiogram, httpx — образ ~150 МБ
+│   └── requirements.txt            # aiogram, httpx — образ 250 МБ
 ├── src/
 │   └── clip_zero_shot_search.py    # CLI-обёртка над core/ (build / add / text / image)
 ├── tests/                          # 162 теста; веса CLIP не загружаются (модель подменяется)
@@ -108,7 +108,7 @@ clip_zero_shot_search/
 │   └── search_result_*.png                  # коллажи с результатами последнего CLI-поиска
 ├── Dockerfile.web                  # API: FastAPI + CLIP (раздел 9.5)
 ├── Dockerfile.ui                   # сборка фронтенда и отдача через nginx
-├── Dockerfile.bot                  # Telegram-бот без модели, ~150 МБ
+├── Dockerfile.bot                  # Telegram-бот без модели, 250 МБ
 ├── docker-compose.yml              # три сервиса: web, ui, bot
 ├── .env.example                    # шаблон .env (токены, квоты, адреса)
 ├── requirements.txt                # зависимости CLI
@@ -472,7 +472,7 @@ python -m bot.bot                        # бот (нужны TELEGRAM_BOT_TOKEN
                            ├──HTTP─▶ единственный процесс с CLIP
   Telegram ──▶ бот ────────┘        единственный писатель индекса
                без модели                    │
-               ~150 МБ                       ├── SQLite: пользователи, базы, задачи
+               250 МБ                       ├── SQLite: пользователи, базы, задачи
                                              └── data/users/<user>/databases/<db>/
                                                  индекс, оригиналы, превью
 ```
@@ -544,7 +544,7 @@ React + Vite, собирается в статику и отдаётся nginx. 
 |---|---|---|
 | `Dockerfile.web` | FastAPI, CLIP (веса запекаются в образ), faiss | ~2 ГБ |
 | `Dockerfile.ui` | сборка Vite, затем nginx со статикой | ~50 МБ |
-| `Dockerfile.bot` | aiogram и httpx, без torch | ~150 МБ |
+| `Dockerfile.bot` | aiogram и httpx, без torch | 250 МБ |
 
 Веса CLIP кэшируются в образ на этапе сборки, поэтому контейнер стартует офлайн
 (`HF_HUB_OFFLINE=1`). Данные монтируются как volume и переживают пересборку. Порт API
