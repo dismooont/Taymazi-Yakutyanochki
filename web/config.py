@@ -40,6 +40,8 @@ class Settings:
     max_bytes_per_user: int
     min_password_length: int
     trust_proxy: bool
+    telegram_bot_token: str
+    telegram_bot_username: str
 
     @property
     def db_path(self) -> Path:
@@ -57,6 +59,17 @@ class Settings:
         на http://localhost, где браузер такую cookie просто не сохранит.
         """
         return self.public_url.startswith("https://")
+
+    @property
+    def telegram_ready(self) -> bool:
+        """
+        Вход через Telegram работает, только если включён И есть чем проверять подпись
+        И известно имя бота для виджета. Полувключённое состояние хуже выключенного:
+        кнопка есть, а вход не работает.
+        """
+        return bool(
+            self.telegram_auth_enabled and self.telegram_bot_token and self.telegram_bot_username
+        )
 
     def user_dir(self, user_id: str) -> Path:
         return self.users_dir / user_id
@@ -82,6 +95,10 @@ def get_settings() -> Settings:
         # который сам проставляет X-Real-IP. Иначе клиент подделает заголовок и обойдёт
         # ограничение частоты входа.
         trust_proxy=_flag("TRUST_PROXY", False),
+        # Токен того же бота, что и в Telegram-боте: подпись виджета проверяется им.
+        telegram_bot_token=os.environ.get("TELEGRAM_BOT_TOKEN", "").strip(),
+        # Имя бота нужно фронтенду, чтобы отрисовать виджет входа.
+        telegram_bot_username=os.environ.get("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@"),
     )
 
 

@@ -8,11 +8,11 @@ docs/WEB_PLAN.md, раздел 7.1: одинаковый текст ошибки
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException, Request, Response, status
+from fastapi import APIRouter, Cookie, HTTPException, Request, Response, status
 
-from web import db
+from web import db, telegram
 from web.config import get_settings
 from web.deps import CurrentUser, client_ip
 from web.schemas import LoginRequest, PasswordChangeRequest, RegisterRequest, UserOut
@@ -26,6 +26,7 @@ from web.security import (
     new_session_token,
     normalize_login,
     register_limiter,
+    telegram_limiter,
     validate_login,
     validate_password,
     verify_password,
@@ -144,7 +145,74 @@ def logout_all(request: Request, user: CurrentUser) -> dict:
     return {"closed_sessions": closed}
 
 
+@router.post("/telegram", response_model=UserOut)
+def telegram_auth(
+    payload: dict, request: Request, response: Response,
+    session: Annotated[str | None, Cookie(alias=SESSION_COOKIE)] = None,
+) -> UserOut:
+    """
+    Вход или привязка через Telegram Login Widget.
+
+    Три случая:
+      1. Пользователь уже вошёл по паролю — привязываем Telegram к его аккаунту.
+      2. Такой Telegram уже привязан — обычный вход.
+      3. Ни того ни другого — заводим новый аккаунт без пароля; задать пароль
+         можно позже через /api/me/password с пустым old_password.
+    """
+    settings = get_settings()
+    if not settings.telegram_ready:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Вход через Telegram не настроен")
+
+    if not telegram_limiter.check(client_ip(request)):
+        raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Слишком много попыток, подождите")
+
+    try:
+        data = telegram.verify(payload, settings.telegram_bot_token)
+    except telegram.TelegramAuthError as e:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(e)) from e
+
+    linked = db.get_user_by_identity("telegram", data["telegram_id"])
+    current = _user_from_cookie(session)
+
+    if current is not None:
+        if linked is not None and linked["id"] != current["id"]:
+            raise HTTPException(
+                status.HTTP_409_CONFLICT, "Этот Telegram уже привязан к другому аккаунту"
+            )
+        db.link_identity("telegram", data["telegram_id"], current["id"])
+        return _user_out(db.get_user(current["id"]))
+
+    if linked is None:
+        linked = db.create_user(login=None, display_name=data["display_name"], password_hash=None)
+        db.link_identity("telegram", data["telegram_id"], linked["id"])
+
+    _start_session(response, request, linked["id"])
+    return _user_out(linked)
+
+
+def _user_from_cookie(session: str | None) -> dict[str, Any] | None:
+    """Мягкая версия get_current_user: без сессии не ошибка, а просто «не вошёл»."""
+    if not session:
+        return None
+    row = db.get_session(hash_token(session))
+    if row is None or db.is_expired(row["expires_at"]):
+        return None
+    return db.get_user(row["user_id"])
+
+
 me_router = APIRouter(prefix="/api/me", tags=["auth"])
+
+
+@me_router.delete("/identities/telegram", response_model=UserOut)
+def unlink_telegram(user: CurrentUser) -> UserOut:
+    if not user["password_hash"]:
+        # иначе аккаунт остался бы без единого способа войти
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Сначала задайте пароль — иначе войти будет нечем",
+        )
+    db.unlink_identity("telegram", user["id"])
+    return _user_out(db.get_user(user["id"]))
 
 
 @me_router.get("", response_model=UserOut)

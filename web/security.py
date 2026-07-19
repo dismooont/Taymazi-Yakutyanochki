@@ -151,3 +151,6 @@ class RateLimiter:
 
 login_limiter = RateLimiter(limit=5, window_seconds=15 * 60)
 register_limiter = RateLimiter(limit=10, window_seconds=60 * 60)
+# Подпись виджета подобрать нельзя, но лимит защищает от вала запросов с проверкой
+# HMAC — она дешевле argon2, зато и попыток можно послать больше.
+telegram_limiter = RateLimiter(limit=30, window_seconds=15 * 60)

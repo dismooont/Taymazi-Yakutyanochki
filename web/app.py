@@ -109,6 +109,20 @@ def create_app() -> FastAPI:
     def health() -> dict:
         return {"status": "ok"}
 
+    @app.get("/api/config", tags=["service"])
+    def public_config() -> dict:
+        """
+        Настройки, нужные интерфейсу до входа: показывать ли кнопку Telegram и
+        открыта ли регистрация. Ничего секретного здесь быть не должно — ручка
+        доступна без авторизации.
+        """
+        settings = get_settings()
+        return {
+            "registration_open": settings.registration_open,
+            "telegram_auth": settings.telegram_ready,
+            "telegram_bot": settings.telegram_bot_username if settings.telegram_ready else None,
+        }
+
     return app
 
 

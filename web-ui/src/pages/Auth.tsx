@@ -6,10 +6,47 @@
  * человека выяснять это в тот момент, когда пароль уже забыт.
  */
 
-import { useState } from 'react'
-import { ApiError, api, type User } from '../api'
+import { useEffect, useRef, useState } from 'react'
+import { ApiError, api, type PublicConfig, type TelegramPayload, type User } from '../api'
 
 type Mode = 'login' | 'register'
+
+declare global {
+  interface Window {
+    onTelegramAuth?: (user: TelegramPayload) => void
+  }
+}
+
+/**
+ * Кнопка входа через Telegram.
+ *
+ * Виджет — это скрипт с сайта Telegram, который сам рисует кнопку и вызывает
+ * глобальную функцию с подписанными данными. Их нельзя принимать на веру: подпись
+ * проверяет сервер по токену бота.
+ */
+function TelegramButton({ bot, onAuth }: { bot: string; onAuth: (p: TelegramPayload) => void }) {
+  const holder = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    window.onTelegramAuth = onAuth
+    const script = document.createElement('script')
+    script.src = 'https://telegram.org/js/telegram-widget.js?22'
+    script.async = true
+    script.setAttribute('data-telegram-login', bot)
+    script.setAttribute('data-size', 'large')
+    script.setAttribute('data-radius', '3')
+    script.setAttribute('data-onauth', 'onTelegramAuth(user)')
+    holder.current?.appendChild(script)
+
+    const node = holder.current
+    return () => {
+      if (node) node.innerHTML = ''
+      delete window.onTelegramAuth
+    }
+  }, [bot, onAuth])
+
+  return <div ref={holder} />
+}
 
 export function Auth({ onAuth }: { onAuth: (user: User) => void }) {
   const [mode, setMode] = useState<Mode>('login')
@@ -18,6 +55,20 @@ export function Auth({ onAuth }: { onAuth: (user: User) => void }) {
   const [confirm, setConfirm] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [config, setConfig] = useState<PublicConfig | null>(null)
+
+  useEffect(() => {
+    api.config().then(setConfig).catch(() => undefined)
+  }, [])
+
+  const enterWithTelegram = async (payload: TelegramPayload) => {
+    setError(null)
+    try {
+      onAuth(await api.telegramAuth(payload))
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Telegram не ответил')
+    }
+  }
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault()
@@ -131,9 +182,19 @@ export function Auth({ onAuth }: { onAuth: (user: User) => void }) {
         </button>
       </form>
 
+      {config?.telegram_auth && config.telegram_bot && (
+        <div className="stack" style={{ gap: 10 }}>
+          <div className="divider">
+            <span>или</span>
+          </div>
+          <TelegramButton bot={config.telegram_bot} onAuth={enterWithTelegram} />
+        </div>
+      )}
+
       <p className="note">
-        Пароль восстановить не получится: почтовый сервер для писем со сбросом не
-        подключён. Запишите пароль в надёжном месте.
+        {config?.telegram_auth
+          ? 'Пароль восстановить не получится: почтовый сервер для писем со сбросом не подключён. Привяжите Telegram — через него можно будет войти.'
+          : 'Пароль восстановить не получится: почтовый сервер для писем со сбросом не подключён. Запишите пароль в надёжном месте.'}
       </p>
     </div>
   )

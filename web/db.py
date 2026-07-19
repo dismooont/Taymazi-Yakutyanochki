@@ -191,6 +191,13 @@ def link_identity(provider: str, provider_user_id: str, user_id: str) -> None:
         )
 
 
+def unlink_identity(provider: str, user_id: str) -> None:
+    with connect() as conn:
+        conn.execute(
+            "DELETE FROM identities WHERE provider = ? AND user_id = ?", (provider, user_id)
+        )
+
+
 def get_user_by_identity(provider: str, provider_user_id: str) -> dict[str, Any] | None:
     with connect() as conn:
         row = conn.execute(

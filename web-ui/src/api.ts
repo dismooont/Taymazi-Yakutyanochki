@@ -124,8 +124,20 @@ function json<T>(path: string, method: string, body?: unknown): Promise<T> {
   })
 }
 
+export interface PublicConfig {
+  registration_open: boolean
+  telegram_auth: boolean
+  telegram_bot: string | null
+}
+
+/** Данные, которые присылает виджет Telegram. Проверяются на сервере по подписи. */
+export type TelegramPayload = Record<string, string | number>
+
 export const api = {
+  config: () => request<PublicConfig>('/config'),
   me: () => request<User>('/me'),
+  telegramAuth: (payload: TelegramPayload) => json<User>('/auth/telegram', 'POST', payload),
+  unlinkTelegram: () => request<User>('/me/identities/telegram', { method: 'DELETE' }),
   register: (login: string, password: string, display_name?: string) =>
     json<User>('/auth/register', 'POST', { login, password, display_name }),
   login: (login: string, password: string) => json<User>('/auth/login', 'POST', { login, password }),
