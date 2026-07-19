@@ -300,3 +300,102 @@ def set_database_status(database_id: str, status: str) -> None:
 def delete_database(database_id: str) -> None:
     with connect() as conn:
         conn.execute("DELETE FROM databases WHERE id = ?", (database_id,))
+
+
+# --------------------------------------------------------------------------
+# Фоновые задачи
+# --------------------------------------------------------------------------
+
+ACTIVE_JOB_STATUSES = ("queued", "running")
+
+
+def create_job(*, user_id: str, database_id: str | None, kind: str, total: int = 0) -> dict[str, Any]:
+    job_id = new_id()
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO jobs (id, user_id, database_id, kind, status, progress_total, created_at)"
+            " VALUES (?, ?, ?, ?, 'queued', ?, ?)",
+            (job_id, user_id, database_id, kind, total, now()),
+        )
+    return get_job(job_id)
+
+
+def get_job(job_id: str) -> dict[str, Any] | None:
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+    return dict(row) if row else None
+
+
+def list_jobs(user_id: str, database_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+    query = "SELECT * FROM jobs WHERE user_id = ?"
+    params: list[Any] = [user_id]
+    if database_id:
+        query += " AND database_id = ?"
+        params.append(database_id)
+    query += " ORDER BY created_at DESC LIMIT ?"
+    params.append(limit)
+    with connect() as conn:
+        return [dict(row) for row in conn.execute(query, params).fetchall()]
+
+
+def queue_position(job_id: str) -> int:
+    """
+    Сколько задач стоит перед этой. Очередь одна на всё приложение, поэтому при работе
+    нескольких пользователей UI должен показывать «3-й в очереди», а не молчаливый спиннер.
+    """
+    job = get_job(job_id)
+    if job is None or job["status"] != "queued":
+        return 0
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM jobs WHERE status = 'queued' AND created_at < ?",
+            (job["created_at"],),
+        ).fetchone()
+    return int(row[0])
+
+
+def start_job(job_id: str) -> None:
+    with connect() as conn:
+        conn.execute(
+            "UPDATE jobs SET status = 'running', started_at = ? WHERE id = ?", (now(), job_id)
+        )
+
+
+def update_job_progress(job_id: str, done: int, total: int) -> None:
+    with connect() as conn:
+        conn.execute(
+            "UPDATE jobs SET progress_done = ?, progress_total = ? WHERE id = ?",
+            (done, total, job_id),
+        )
+
+
+def set_job_message(job_id: str, message: str) -> None:
+    with connect() as conn:
+        conn.execute("UPDATE jobs SET message = ? WHERE id = ?", (message[:500], job_id))
+
+
+def finish_job(job_id: str, status: str, message: str | None = None) -> None:
+    with connect() as conn:
+        conn.execute(
+            "UPDATE jobs SET status = ?, message = ?, finished_at = ? WHERE id = ?",
+            (status, (message or "")[:500], now(), job_id),
+        )
+
+
+def has_active_job(database_id: str) -> bool:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM jobs WHERE database_id = ? AND status IN (?, ?) LIMIT 1",
+            (database_id, *ACTIVE_JOB_STATUSES),
+        ).fetchone()
+    return row is not None
+
+
+def fail_unfinished_jobs(message: str) -> int:
+    with connect() as conn:
+        cur = conn.execute(
+            "UPDATE jobs SET status = 'error', message = ?, finished_at = ?"
+            " WHERE status IN (?, ?)",
+            (message, now(), *ACTIVE_JOB_STATUSES),
+        )
+        return cur.rowcount

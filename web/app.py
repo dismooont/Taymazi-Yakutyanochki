@@ -18,7 +18,8 @@ from fastapi.responses import JSONResponse
 
 from web import db
 from web.config import get_settings
-from web.routers import auth, databases
+from web.jobs import job_queue, recover_interrupted_jobs
+from web.routers import auth, databases, jobs, photos
 
 # Мутирующие запросы обязаны нести этот заголовок. Простую HTML-форму с чужого сайта
 # так не подделать: заголовок требует XHR/fetch, а на них распространяется CORS.
@@ -56,10 +57,18 @@ async def lifespan(app: FastAPI):
     if removed:
         print(f"Удалено протухших сессий: {removed}")
     _preload_model()
+
+    interrupted = recover_interrupted_jobs()
+    if interrupted:
+        print(f"Задач прервано прошлым перезапуском: {interrupted}")
+    job_queue.start()
     print(f"Данные: {settings.data_dir} | регистрация: "
           f"{'открыта' if settings.registration_open else 'закрыта'} | "
           f"Telegram-вход: {'вкл' if settings.telegram_auth_enabled else 'выкл'}")
-    yield
+    try:
+        yield
+    finally:
+        job_queue.stop()
 
 
 def create_app() -> FastAPI:
@@ -91,6 +100,8 @@ def create_app() -> FastAPI:
     app.include_router(auth.me_router)
     app.include_router(databases.router)
     app.include_router(databases.quota_router)
+    app.include_router(photos.router)
+    app.include_router(jobs.router)
 
     @app.get("/api/health", tags=["service"])
     def health() -> dict:

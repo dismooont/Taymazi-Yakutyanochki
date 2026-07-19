@@ -74,6 +74,61 @@ class DatabaseOut(BaseModel):
         )
 
 
+class PhotoOut(BaseModel):
+    photo_id: str
+    bytes: int
+    added_at: str
+
+
+class PhotoPageOut(BaseModel):
+    total: int
+    offset: int
+    items: list[PhotoOut]
+
+
+class AddPhotosOut(BaseModel):
+    """
+    Ответ на добавление фото. job_id заполнен, если работа ушла в очередь;
+    added/skipped — если файлов было мало и они обработаны сразу.
+    """
+
+    job_id: str | None = None
+    added: int = 0
+    skipped: list[tuple[str, str]] = Field(default_factory=list)
+
+
+class DeletePhotosRequest(BaseModel):
+    photo_ids: list[str] = Field(min_length=1, max_length=1000)
+
+
+class JobOut(BaseModel):
+    id: str
+    kind: str
+    status: str
+    database_id: str | None
+    progress_done: int
+    progress_total: int
+    queue_position: int
+    message: str | None
+    created_at: str
+    finished_at: str | None
+
+    @classmethod
+    def from_row(cls, row: dict, queue_position: int = 0) -> "JobOut":
+        return cls(
+            id=row["id"],
+            kind=row["kind"],
+            status=row["status"],
+            database_id=row["database_id"],
+            progress_done=row["progress_done"],
+            progress_total=row["progress_total"],
+            queue_position=queue_position,
+            message=row["message"],
+            created_at=row["created_at"],
+            finished_at=row["finished_at"],
+        )
+
+
 class QuotaOut(BaseModel):
     """Лимиты и текущее потребление — фронт показывает их рядом с объёмом базы."""
 

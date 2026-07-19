@@ -399,26 +399,44 @@ class IndexStore:
                 return result
 
             total = len(staged)
-            for start in range(0, total, FLUSH_EVERY):
-                chunk = staged[start:start + FLUSH_EVERY]
-                embeddings = compute_image_embeddings(
-                    [path for _, path in chunk],
-                    on_progress=(
-                        (lambda done, _t, base=start: on_progress(base + done, total))
-                        if on_progress
-                        else None
-                    ),
-                    show_progress=show_progress,
-                    holder=holder,
-                )
-                self._index.add(embeddings)
-                for photo, _ in chunk:
-                    self._by_id[photo.photo_id] = len(self._photos)
-                    self._photos.append(photo)
-                    result.added.append(photo)
-                self._persist()  # чанк = FLUSH_EVERY, так что сброс идёт раз в 500 фото
+            processed = 0
+            try:
+                for start in range(0, total, FLUSH_EVERY):
+                    chunk = staged[start:start + FLUSH_EVERY]
+                    embeddings = compute_image_embeddings(
+                        [path for _, path in chunk],
+                        on_progress=(
+                            (lambda done, _t, base=start: on_progress(base + done, total))
+                            if on_progress
+                            else None
+                        ),
+                        show_progress=show_progress,
+                        holder=holder,
+                    )
+                    self._index.add(embeddings)
+                    for photo, _ in chunk:
+                        self._by_id[photo.photo_id] = len(self._photos)
+                        self._photos.append(photo)
+                        result.added.append(photo)
+                    processed = start + len(chunk)
+                    self._persist()  # чанк = FLUSH_EVERY, сброс идёт раз в 500 фото
+            except BaseException:
+                # прерывание на середине (отмена задачи, ошибка модели) не должно оставлять
+                # скопированные, но не проиндексированные файлы: они не видны в базе,
+                # зато занимают место и попадут в подсчёт объёма
+                self._discard_staged(staged[processed:])
+                self._persist()
+                raise
 
             return result
+
+    def _discard_staged(self, staged: list[tuple[Photo, Path]]) -> None:
+        for photo, path in staged:
+            for target in (path, self.root / THUMBS_DIR / f"{photo.photo_id}.webp"):
+                try:
+                    target.unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     @staticmethod
     def _is_valid_image(path: Path) -> bool:
