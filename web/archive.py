@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import io
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -176,30 +177,84 @@ def _copy_limited(source, target, limit: int, chunk_size: int = 1 << 20) -> None
         target.write(chunk)
 
 
-def stream_zip(entries: Iterator[tuple[str, Path]], manifest: bytes | None = None):
+class _ZipSink(io.RawIOBase):
     """
-    Генератор байтов zip-архива для потоковой отдачи (этап M4).
+    Приёмник байтов для zipfile, из которого их забирают порциями.
 
-    ZIP_STORED без сжатия: фотографии — уже сжатый JPEG, тратить на них CPU бессмысленно,
-    а без сжатия архив можно отдавать на лету, не собирая временный файл на диске.
+    Наивная реализация «писать в BytesIO и после каждого файла очищать его» ломает
+    архив: zipfile запоминает смещения записей через fp.tell(), а очистка буфера
+    сбрасывает позицию в ноль — центральный каталог начинает указывать не туда,
+    и такой архив не открывается. Поэтому позиция здесь считается независимо от
+    того, сколько байт уже отдано наружу.
+
+    seekable() = False — для zipfile это сигнал писать в потоковом режиме, без
+    возврата назад для правки заголовков.
     """
-    import io
 
-    buffer = io.BytesIO()
-    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_STORED) as archive:
+    def __init__(self) -> None:
+        self._chunks: list[bytes] = []
+        self._position = 0
+
+    def writable(self) -> bool:
+        return True
+
+    def seekable(self) -> bool:
+        return False
+
+    def write(self, data) -> int:
+        data = bytes(data)
+        self._chunks.append(data)
+        self._position += len(data)
+        return len(data)
+
+    def tell(self) -> int:
+        return self._position
+
+    def take(self) -> bytes:
+        """Забирает накопленное, не трогая счётчик позиции."""
+        if not self._chunks:
+            return b""
+        data = b"".join(self._chunks)
+        self._chunks.clear()
+        return data
+
+
+def stream_zip(entries: Iterator[tuple[str, Path]], manifest: bytes | None = None,
+               chunk_size: int = 1 << 20):
+    """
+    Генератор байтов zip-архива для потоковой отдачи.
+
+    ZIP_STORED без сжатия: фотографии — уже сжатый JPEG, тратить на них CPU бессмысленно.
+    Зато без сжатия архив отдаётся на лету, не собираясь целиком ни в памяти, ни во
+    временном файле: база на 2 ГБ иначе потребовала бы 2 ГБ свободного места только
+    ради того, чтобы её скачать.
+    """
+    sink = _ZipSink()
+    with zipfile.ZipFile(sink, "w", compression=zipfile.ZIP_STORED) as archive:
         if manifest is not None:
             archive.writestr("manifest.json", manifest)
-            yield _drain(buffer)
+            yield sink.take()
+
         for arcname, path in entries:
-            archive.write(path, arcname)
-            chunk = _drain(buffer)
-            if chunk:
-                yield chunk
-    yield _drain(buffer)
+            try:
+                info = zipfile.ZipInfo.from_file(path, arcname)
+            except OSError:
+                # файл удалили, пока шла выгрузка, — пропускаем: обрывать скачивание
+                # целой базы из-за одного снимка неправильно
+                continue
+            info.compress_type = zipfile.ZIP_STORED
+            try:
+                with archive.open(info, "w") as target, open(path, "rb") as source:
+                    while True:
+                        chunk = source.read(chunk_size)
+                        if not chunk:
+                            break
+                        target.write(chunk)
+                        # отдаём порциями прямо во время записи файла: иначе стомегабайтный
+                        # снимок целиком осел бы в памяти
+                        yield sink.take()
+            except OSError:
+                continue
+            yield sink.take()
 
-
-def _drain(buffer) -> bytes:
-    data = buffer.getvalue()
-    buffer.seek(0)
-    buffer.truncate(0)
-    return data
+    yield sink.take()  # центральный каталог, дописанный при закрытии
