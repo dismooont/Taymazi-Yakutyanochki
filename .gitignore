@@ -7,6 +7,12 @@ data/user_photos/
 index/*
 !index/.gitkeep
 
+# Веб-приложение: базы пользователей и их фотографии, служебная SQLite
+data/users/
+data/app.db
+data/app.db-wal
+data/app.db-shm
+
 # Секреты (Telegram-бот)
 .env
 

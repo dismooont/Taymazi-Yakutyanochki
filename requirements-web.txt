@@ -1,0 +1,14 @@
+# Зависимости веб-приложения (web/). Ядро core/ тянет свои из requirements.txt.
+#
+# Запуск в разработке:
+#   pip install -r requirements-web.txt
+#   uvicorn web.app:app --reload --port 8000
+# Только один воркер: веса CLIP занимают ~600 МБ на процесс, а несколько воркеров
+# писали бы в один FAISS-индекс наперегонки (docs/WEB_PLAN.md, раздел 2).
+
+-r requirements.txt
+
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9    # загрузка файлов и архивов (этапы M2-M3)
+argon2-cffi>=23.1          # хеширование паролей (argon2id)

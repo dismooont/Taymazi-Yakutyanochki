@@ -1,0 +1,85 @@
+"""
+Настройки веб-приложения. Всё берётся из переменных окружения (.env в разработке,
+env_file в docker-compose) — см. docs/WEB_PLAN.md, раздел 9.
+"""
+
+from __future__ import annotations
+
+import os
+from dataclasses import dataclass
+from functools import lru_cache
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+
+def _flag(name: str, default: bool) -> bool:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    return raw.strip().lower() in ("1", "true", "yes", "on")
+
+
+def _int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    try:
+        return int(raw) if raw is not None else default
+    except ValueError:
+        return default
+
+
+@dataclass(frozen=True)
+class Settings:
+    data_dir: Path
+    public_url: str
+    registration_open: bool
+    telegram_auth_enabled: bool
+    session_ttl_days: int
+    max_db_per_user: int
+    max_photos_per_db: int
+    max_bytes_per_user: int
+    min_password_length: int
+
+    @property
+    def db_path(self) -> Path:
+        return self.data_dir / "app.db"
+
+    @property
+    def users_dir(self) -> Path:
+        return self.data_dir / "users"
+
+    @property
+    def cookie_secure(self) -> bool:
+        """
+        Флаг Secure у cookie выводится из адреса, а не задаётся отдельной переменной:
+        так его нельзя случайно забыть включить в проде и невозможно сломать разработку
+        на http://localhost, где браузер такую cookie просто не сохранит.
+        """
+        return self.public_url.startswith("https://")
+
+    def user_dir(self, user_id: str) -> Path:
+        return self.users_dir / user_id
+
+    def database_dir(self, user_id: str, database_id: str) -> Path:
+        return self.user_dir(user_id) / "databases" / database_id
+
+
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    data_dir = Path(os.environ.get("DATA_DIR", PROJECT_ROOT / "data")).resolve()
+    return Settings(
+        data_dir=data_dir,
+        public_url=os.environ.get("PUBLIC_URL", "http://localhost:5173"),
+        registration_open=_flag("REGISTRATION_OPEN", True),
+        telegram_auth_enabled=_flag("TELEGRAM_AUTH_ENABLED", False),
+        session_ttl_days=_int("SESSION_TTL_DAYS", 30),
+        max_db_per_user=_int("MAX_DB_PER_USER", 5),
+        max_photos_per_db=_int("MAX_PHOTOS_PER_DB", 5000),
+        max_bytes_per_user=_int("MAX_BYTES_PER_USER", 3 * 1024 ** 3),
+        min_password_length=_int("MIN_PASSWORD_LENGTH", 10),
+    )
+
+
+def reset_settings() -> None:
+    """Сбрасывает кэш настроек. Нужно тестам, которые подменяют переменные окружения."""
+    get_settings.cache_clear()

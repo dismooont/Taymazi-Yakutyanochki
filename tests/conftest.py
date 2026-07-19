@@ -25,6 +25,9 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from core.model import ModelHolder  # noqa: E402
 
+# фикстуры веб-тестов (app_env, client, registered) — см. tests/conftest_web.py
+pytest_plugins = ["tests.conftest_web"]
+
 FAKE_DIM = 32
 
 
