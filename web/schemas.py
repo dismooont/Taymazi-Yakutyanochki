@@ -55,12 +55,15 @@ class DatabaseOut(BaseModel):
     total_bytes: int
     has_captions: bool
     status: str
+    preview: list[str] = Field(default_factory=list)
     created_at: str
     updated_at: str
 
     @classmethod
     def from_row(cls, row: dict) -> "DatabaseOut":
+        raw_preview = row.get("preview") or ""
         return cls(
+            preview=[pid for pid in raw_preview.split(",") if pid],
             id=row["id"],
             name=row["name"],
             photos_count=row["photos_count"],

@@ -73,15 +73,22 @@ class StoreCache:
 store_cache = StoreCache()
 
 
+PREVIEW_COUNT = 4
+
+
 def sync_stats(database_id: str, store: IndexStore) -> dict:
     """Переносит реальные показатели базы в SQLite и возвращает обновлённую строку."""
     stats = store.stats()
+    # id первых снимков сохраняем здесь же: список баз показывает по ним превью,
+    # и открывать ради этого каждую базу с диска было бы расточительно
+    preview = [photo.photo_id for photo in store.list_photos(0, PREVIEW_COUNT)]
     db.update_database_stats(
         database_id,
         photos_count=stats.photos_count,
         photos_bytes=stats.photos_bytes,
         index_bytes=stats.index_bytes,
         has_captions=stats.has_captions,
+        preview=preview,
     )
     return db.get_database(database_id)
 

@@ -54,6 +54,7 @@ CREATE TABLE IF NOT EXISTS databases (
     index_bytes  INTEGER NOT NULL DEFAULT 0,
     has_captions INTEGER NOT NULL DEFAULT 0,
     status       TEXT NOT NULL DEFAULT 'ready',   -- ready | indexing | error
+    preview      TEXT NOT NULL DEFAULT '',        -- photo_id первых снимков, через запятую
     created_at   TEXT NOT NULL,
     updated_at   TEXT NOT NULL
 );
@@ -120,6 +121,23 @@ def connect() -> Iterator[sqlite3.Connection]:
 def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA)
+        _add_missing_columns(conn)
+
+
+# Колонки, появившиеся после первой версии схемы. CREATE TABLE IF NOT EXISTS не
+# трогает уже созданную таблицу, поэтому на существующей базе их надо добавить
+# отдельно — иначе обновление приложения ломает рабочий стенд.
+LATER_COLUMNS = {
+    "databases": {"preview": "TEXT NOT NULL DEFAULT ''"},
+}
+
+
+def _add_missing_columns(conn: sqlite3.Connection) -> None:
+    for table, columns in LATER_COLUMNS.items():
+        existing = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+        for name, definition in columns.items():
+            if name not in existing:
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN {name} {definition}")
 
 
 # --------------------------------------------------------------------------
@@ -280,12 +298,14 @@ def rename_database(database_id: str, name: str) -> None:
 
 
 def update_database_stats(database_id: str, *, photos_count: int, photos_bytes: int,
-                          index_bytes: int, has_captions: bool) -> None:
+                          index_bytes: int, has_captions: bool,
+                          preview: list[str] | None = None) -> None:
     with connect() as conn:
         conn.execute(
             "UPDATE databases SET photos_count = ?, photos_bytes = ?, index_bytes = ?,"
-            " has_captions = ?, updated_at = ? WHERE id = ?",
-            (photos_count, photos_bytes, index_bytes, int(has_captions), now(), database_id),
+            " has_captions = ?, preview = ?, updated_at = ? WHERE id = ?",
+            (photos_count, photos_bytes, index_bytes, int(has_captions),
+             ",".join(preview or []), now(), database_id),
         )
 
 

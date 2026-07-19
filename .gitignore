@@ -24,6 +24,10 @@ venv/
 *.egg-info/
 .pytest_cache/
 
+# Фронтенд
+node_modules/
+web-ui/dist/
+
 # PyCharm
 .idea/workspace.xml
 .idea/tasks.xml
@@ -32,3 +36,4 @@ venv/
 # Прочее
 .DS_Store
 *.log
+web-ui/*.tsbuildinfo
