@@ -291,6 +291,10 @@ class IndexStore:
     def has(self, photo_id: str) -> bool:
         return photo_id in self._by_id
 
+    def get_photo(self, photo_id: str) -> Photo | None:
+        index = self._by_id.get(photo_id)
+        return self._photos[index] if index is not None else None
+
     def list_photos(self, offset: int = 0, limit: int | None = None) -> list[Photo]:
         """Свежие сверху — так галерея в вебе показывает только что добавленное первым."""
         ordered = list(reversed(self._photos))

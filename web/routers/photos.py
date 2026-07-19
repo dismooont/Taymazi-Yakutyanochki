@@ -12,6 +12,7 @@ import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse
 
 from core.store import IndexStore
 from web import db
@@ -122,6 +123,49 @@ def list_photos(database: OwnedDatabase, offset: int = 0, limit: int = 60) -> Ph
             PhotoOut(photo_id=p.photo_id, bytes=p.bytes, added_at=p.added_at) for p in photos
         ],
     )
+
+
+# --------------------------------------------------------------------------
+# Отдача файлов
+# --------------------------------------------------------------------------
+
+def resolve_photo_file(database: dict, photo_id: str, *, thumb: bool) -> Path:
+    """
+    Путь к файлу фотографии с двойной проверкой.
+
+    Первая — владение базой (её делает зависимость get_owned_database). Вторая —
+    что итоговый путь физически лежит внутри папки этой базы: photo_id приходит
+    от пользователя, и один этот факт обязывает не доверять ему при построении пути.
+    """
+    store = store_cache.get(database["user_id"], database["id"])
+    photo = store.get_photo(photo_id)
+    if photo is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Фото не найдено")
+
+    path = (store.thumb_path(photo) or store.photo_path(photo)) if thumb else store.photo_path(photo)
+    root = get_settings().database_dir(database["user_id"], database["id"]).resolve()
+    if not path.resolve().is_relative_to(root) or not path.exists():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Файл недоступен")
+    return path
+
+
+def _photo_response(path: Path) -> FileResponse:
+    # photo_id — это хеш содержимого, поэтому файл по такому адресу никогда не меняется
+    # и его можно кэшировать вечно. private, а не public: содержимое принадлежит
+    # конкретному пользователю и не должно оседать в общих прокси.
+    return FileResponse(
+        path, headers={"Cache-Control": "private, max-age=31536000, immutable"}
+    )
+
+
+@router.get("/photos/{photo_id}/thumb")
+def get_thumb(database: OwnedDatabase, photo_id: str) -> FileResponse:
+    return _photo_response(resolve_photo_file(database, photo_id, thumb=True))
+
+
+@router.get("/photos/{photo_id}/file")
+def get_photo_file(database: OwnedDatabase, photo_id: str) -> FileResponse:
+    return _photo_response(resolve_photo_file(database, photo_id, thumb=False))
 
 
 # --------------------------------------------------------------------------

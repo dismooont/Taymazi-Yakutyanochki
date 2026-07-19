@@ -101,6 +101,37 @@ class DeletePhotosRequest(BaseModel):
     photo_ids: list[str] = Field(min_length=1, max_length=1000)
 
 
+class SearchTextRequest(BaseModel):
+    query: str = Field(min_length=1, max_length=500)
+    top_k: int = Field(default=12, ge=1, le=50)
+    translate: bool = True
+
+
+class SearchHitOut(BaseModel):
+    photo_id: str
+    score: float
+    thumb_url: str
+    file_url: str
+
+
+class CaptionHitOut(BaseModel):
+    photo_id: str
+    score: float
+    caption: str
+
+
+class SearchResultOut(BaseModel):
+    """
+    used_query — то, что реально ушло в CLIP: для русского запроса это его перевод.
+    Фронт показывает это пользователю, иначе непонятно, почему «рыжий кот» нашёл
+    именно эти снимки.
+    """
+
+    used_query: str | None = None
+    results: list[SearchHitOut] = Field(default_factory=list)
+    captions: list[CaptionHitOut] = Field(default_factory=list)
+
+
 class JobOut(BaseModel):
     id: str
     kind: str

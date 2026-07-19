@@ -9,6 +9,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from web.config import reset_settings
+from web.routers.search import search_limiter
 from web.security import login_limiter, register_limiter
 from web.stores import store_cache
 
@@ -23,6 +24,7 @@ def app_env(tmp_path, monkeypatch, holder):
     reset_settings()
     login_limiter.clear()
     register_limiter.clear()
+    search_limiter.clear()
     store_cache.clear()
     yield monkeypatch
     reset_settings()
