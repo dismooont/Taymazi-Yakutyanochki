@@ -542,7 +542,7 @@ React + Vite, собирается в статику и отдаётся nginx. 
 
 | Образ | Что внутри | Размер |
 |---|---|---|
-| `Dockerfile.web` | FastAPI, CLIP (веса запекаются в образ), faiss | ~2 ГБ |
+| `Dockerfile.web` | FastAPI, CLIP (веса запекаются в образ), faiss | 3,8 ГБ |
 | `Dockerfile.ui` | сборка Vite, затем nginx со статикой | ~50 МБ |
 | `Dockerfile.bot` | aiogram и httpx, без torch | 250 МБ |
 
