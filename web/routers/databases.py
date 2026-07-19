@@ -11,9 +11,9 @@ from fastapi import APIRouter, HTTPException, status
 
 from web import db
 from web.config import get_settings
-from web.deps import CurrentUser, OwnedDatabase
+from web.deps import CurrentUser, OwnedDatabase, WritableDatabase
 from web.schemas import CreateDatabaseRequest, DatabaseOut, QuotaOut, RenameDatabaseRequest
-from web.stores import create_store, remove_store_files, store_cache, sync_stats
+from web.stores import create_store, remove_store_files, store_for, sync_stats
 
 router = APIRouter(prefix="/api/databases", tags=["databases"])
 
@@ -56,20 +56,20 @@ def get_stats(database: OwnedDatabase) -> DatabaseOut:
     Пересчитывает объём по реальному состоянию базы. Список баз отдаёт счётчики из БД
     (быстро), а эта ручка — источник правды, если они разошлись после сбоя.
     """
-    store = store_cache.get(database["user_id"], database["id"])
+    store = store_for(database)
     return DatabaseOut.from_row(sync_stats(database["id"], store))
 
 
 @router.patch("/{database_id}", response_model=DatabaseOut)
-def rename_database(payload: RenameDatabaseRequest, database: OwnedDatabase) -> DatabaseOut:
+def rename_database(payload: RenameDatabaseRequest, database: WritableDatabase) -> DatabaseOut:
     db.rename_database(database["id"], payload.name.strip())
     return DatabaseOut.from_row(db.get_database(database["id"]))
 
 
 @router.delete("/{database_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_database(database: OwnedDatabase) -> None:
+def delete_database(database: WritableDatabase) -> None:
     db.delete_database(database["id"])
-    remove_store_files(database["user_id"], database["id"])
+    remove_store_files(database["user_id"], database["id"], database["kind"])
 
 
 quota_router = APIRouter(prefix="/api/quota", tags=["databases"])

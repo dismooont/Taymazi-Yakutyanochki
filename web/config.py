@@ -42,6 +42,8 @@ class Settings:
     trust_proxy: bool
     telegram_bot_token: str
     telegram_bot_username: str
+    telegram_proxy: str
+    telegram_bot_enabled: bool
 
     @property
     def db_path(self) -> Path:
@@ -50,6 +52,15 @@ class Settings:
     @property
     def users_dir(self) -> Path:
         return self.data_dir / "users"
+
+    @property
+    def demo_index_dir(self) -> Path:
+        """
+        Индекс COCO, построенный CLI (команда build). Подключается как демо-база
+        только для чтения: у пользовательских баз нет подписей, поэтому поиск
+        «фото → подпись» больше нигде не показать.
+        """
+        return Path(os.environ.get("DEMO_INDEX_DIR", PROJECT_ROOT / "index")).resolve()
 
     @property
     def cookie_secure(self) -> bool:
@@ -99,6 +110,10 @@ def get_settings() -> Settings:
         telegram_bot_token=os.environ.get("TELEGRAM_BOT_TOKEN", "").strip(),
         # Имя бота нужно фронтенду, чтобы отрисовать виджет входа.
         telegram_bot_username=os.environ.get("TELEGRAM_BOT_USERNAME", "").strip().lstrip("@"),
+        telegram_proxy=os.environ.get("TELEGRAM_PROXY", "").strip(),
+        # Бот работает внутри этого же процесса. Выключается отдельно от входа через
+        # Telegram: вход может быть нужен без бота, а бот — без входа.
+        telegram_bot_enabled=_flag("TELEGRAM_BOT_ENABLED", True),
     )
 
 

@@ -48,6 +48,51 @@ def _preload_model() -> None:
               f"Поиск и добавление фото работать не будут, пока это не исправлено.")
 
 
+def _register_demo_database() -> None:
+    """
+    Подключает построенный CLI индекс COCO как общую базу только для чтения.
+
+    Смысл в том, что у пользовательских баз нет подписей, поэтому поиск
+    «фото → подпись» показать больше негде, а 5000 размеченных снимков — готовая
+    демонстрация. Менять её через интерфейс нельзя: она общая для всех.
+    """
+    settings = get_settings()
+    if db.get_demo_database() is not None:
+        return
+    if not (settings.demo_index_dir / "images.index").exists():
+        return
+
+    owner = db.get_user_by_login("demo-owner") or db.create_user(
+        login="demo-owner", display_name="Демонстрация", password_hash=None
+    )
+    database = db.create_database(
+        owner["id"], "Демо: MS COCO", kind="demo", read_only=True
+    )
+    try:
+        from web.stores import store_for, sync_stats
+
+        sync_stats(database["id"], store_for(database))
+        print(f"Демо-база подключена: {settings.demo_index_dir}")
+    except Exception as e:
+        db.delete_database(database["id"])
+        print(f"[демо-база не подключена] {e}")
+
+
+def _start_bot():
+    """Запускает Telegram-бота фоновой задачей, если он настроен."""
+    settings = get_settings()
+    if not (settings.telegram_bot_enabled and settings.telegram_bot_token):
+        return None, None
+
+    import asyncio
+
+    from web.telegram_bot import run_bot
+
+    stop = asyncio.Event()
+    print("Telegram-бот запущен (long polling)")
+    return asyncio.create_task(run_bot(stop)), stop
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     settings = get_settings()
@@ -62,13 +107,19 @@ async def lifespan(app: FastAPI):
     if interrupted:
         print(f"Задач прервано прошлым перезапуском: {interrupted}")
     job_queue.start()
-    print(f"Данные: {settings.data_dir} | регистрация: "
-          f"{'открыта' if settings.registration_open else 'закрыта'} | "
-          f"Telegram-вход: {'вкл' if settings.telegram_auth_enabled else 'выкл'}")
+    _register_demo_database()
+
+    bot_task, bot_stop = _start_bot()
     try:
         yield
     finally:
+        if bot_task is not None:
+            bot_stop.set()
+            await bot_task
         job_queue.stop()
+    print(f"Данные: {settings.data_dir} | регистрация: "
+          f"{'открыта' if settings.registration_open else 'закрыта'} | "
+          f"Telegram-вход: {'вкл' if settings.telegram_auth_enabled else 'выкл'}")
 
 
 def create_app() -> FastAPI:

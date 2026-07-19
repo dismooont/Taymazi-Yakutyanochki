@@ -16,7 +16,7 @@ from fastapi.responses import StreamingResponse
 
 from web.archive import stream_zip
 from web.deps import OwnedDatabase
-from web.stores import store_cache
+from web.stores import store_for
 
 router = APIRouter(prefix="/api/databases/{database_id}", tags=["export"])
 
@@ -37,7 +37,7 @@ def _content_disposition(name: str) -> str:
 
 @router.get("/export.zip")
 def export_database(database: OwnedDatabase) -> StreamingResponse:
-    store = store_cache.get(database["user_id"], database["id"])
+    store = store_for(database)
     manifest = json.dumps(store.manifest(), ensure_ascii=False, indent=2).encode("utf-8")
 
     return StreamingResponse(

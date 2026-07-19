@@ -158,9 +158,11 @@ export function Workspace() {
         </div>
 
         <div className="row">
-          <Dropzone accept="image/*" multiple variant="compact" onFiles={addPhotos}>
-            Добавить снимки
-          </Dropzone>
+          {!database.read_only && (
+            <Dropzone accept="image/*" multiple variant="compact" onFiles={addPhotos}>
+              Добавить снимки
+            </Dropzone>
+          )}
           <a className="btn" href={api.exportUrl(id)} download>
             Скачать архив
           </a>
@@ -238,7 +240,12 @@ export function Workspace() {
             />
           )}
 
-          {searchTiles.length > 0 && <PhotoGrid tiles={searchTiles} onRemove={removePhoto} />}
+          {searchTiles.length > 0 && (
+            <PhotoGrid
+              tiles={searchTiles}
+              onRemove={database.read_only ? undefined : removePhoto}
+            />
+          )}
 
           {result && result.captions.length > 0 && (
             <div className="stack">
@@ -266,10 +273,10 @@ export function Workspace() {
       {tab === 'gallery' && (
         <div className="stack">
           {gallery.length === 0 ? (
-            <Empty title="В базе нет снимков" hint="Добавьте их кнопкой в шапке." />
+            <Empty title="В базе нет снимков" hint={database.read_only ? undefined : 'Добавьте их кнопкой в шапке.'} />
           ) : (
             <>
-              <PhotoGrid tiles={gallery} onRemove={removePhoto} />
+              <PhotoGrid tiles={gallery} onRemove={database.read_only ? undefined : removePhoto} />
               {gallery.length < galleryTotal && (
                 <button
                   type="button"

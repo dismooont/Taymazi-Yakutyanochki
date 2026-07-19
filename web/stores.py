@@ -26,6 +26,22 @@ DEFAULT_CAPACITY = 4
 DEFAULT_TTL_SECONDS = 15 * 60
 
 
+def database_root(user_id: str, database_id: str, kind: str = "personal") -> Path:
+    """
+    Папка базы на диске. Демо-база — это индекс COCO, построенный CLI ещё до появления
+    веба, поэтому она лежит не в data/users, а там же, где всегда: в index/.
+    """
+    settings = get_settings()
+    if kind == "demo":
+        return settings.demo_index_dir
+    return settings.database_dir(user_id, database_id)
+
+
+def store_for(database: dict) -> IndexStore:
+    """Удобная обёртка: открыть базу по её строке из БД."""
+    return store_cache.get(database["user_id"], database["id"], database.get("kind", "personal"))
+
+
 class StoreCache:
     def __init__(self, capacity: int = DEFAULT_CAPACITY, ttl: float = DEFAULT_TTL_SECONDS):
         self.capacity = capacity
@@ -33,7 +49,7 @@ class StoreCache:
         self._items: OrderedDict[str, tuple[IndexStore, float]] = OrderedDict()
         self._lock = threading.Lock()
 
-    def get(self, user_id: str, database_id: str) -> IndexStore:
+    def get(self, user_id: str, database_id: str, kind: str = "personal") -> IndexStore:
         """Открывает базу (или создаёт папку с пустым индексом) и кладёт её в кэш."""
         with self._lock:
             self._drop_stale()
@@ -46,8 +62,10 @@ class StoreCache:
 
         # открытие вне лока: чтение индекса с диска может занять секунды,
         # и на это время не должны блокироваться остальные базы
-        root = get_settings().database_dir(user_id, database_id)
-        store = IndexStore.open_or_create(root)
+        root = database_root(user_id, database_id, kind)
+        # демо-база — это уже построенный индекс COCO в старом формате: открываем,
+        # но не создаём, иначе опечатка в пути тихо породит пустую базу
+        store = IndexStore.open(root) if kind == "demo" else IndexStore.open_or_create(root)
 
         with self._lock:
             self._items[database_id] = (store, time.monotonic())
@@ -100,12 +118,16 @@ def create_store(user_id: str, database_id: str) -> IndexStore:
     return store
 
 
-def remove_store_files(user_id: str, database_id: str) -> None:
+def remove_store_files(user_id: str, database_id: str, kind: str = "personal") -> None:
     """
     Удаляет папку базы с диска. Вызывается после удаления строки из БД: если упасть
     между шагами, лучше остаться с осиротевшими файлами, чем с записью в БД без файлов.
     """
     store_cache.evict(database_id)
+    if kind == "demo":
+        # демо-база живёт в index/ и принадлежит проекту, а не пользователю:
+        # удаление её строки не должно стирать датасет
+        return
     root: Path = get_settings().database_dir(user_id, database_id)
     if root.exists():
         shutil.rmtree(root, ignore_errors=True)

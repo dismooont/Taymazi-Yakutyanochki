@@ -14,14 +14,14 @@ from pathlib import Path
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 from fastapi.responses import FileResponse
 
-from core.store import IndexStore
+from core.store import PROJECT_ROOT, IndexStore
 from web import db
 from web.archive import ArchiveError, ArchiveLimits, extract_images, inspect
 from web.config import get_settings
-from web.deps import OwnedDatabase
+from web.deps import OwnedDatabase, WritableDatabase
 from web.jobs import JobContext, job_queue
 from web.schemas import AddPhotosOut, DeletePhotosRequest, PhotoOut, PhotoPageOut
-from web.stores import store_cache, sync_stats
+from web.stores import database_root, store_for, sync_stats
 
 router = APIRouter(prefix="/api/databases/{database_id}", tags=["photos"])
 
@@ -113,7 +113,7 @@ def _index_files(store: IndexStore, files: list[Path], context: JobContext | Non
 
 @router.get("/photos", response_model=PhotoPageOut)
 def list_photos(database: OwnedDatabase, offset: int = 0, limit: int = 60) -> PhotoPageOut:
-    store = store_cache.get(database["user_id"], database["id"])
+    store = store_for(database)
     limit = max(1, min(limit, 200))
     photos = store.list_photos(offset=max(0, offset), limit=limit)
     return PhotoPageOut(
@@ -137,14 +137,23 @@ def resolve_photo_file(database: dict, photo_id: str, *, thumb: bool) -> Path:
     что итоговый путь физически лежит внутри папки этой базы: photo_id приходит
     от пользователя, и один этот факт обязывает не доверять ему при построении пути.
     """
-    store = store_cache.get(database["user_id"], database["id"])
+    store = store_for(database)
     photo = store.get_photo(photo_id)
     if photo is None:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Фото не найдено")
 
     path = (store.thumb_path(photo) or store.photo_path(photo)) if thumb else store.photo_path(photo)
-    root = get_settings().database_dir(database["user_id"], database["id"]).resolve()
-    if not path.resolve().is_relative_to(root) or not path.exists():
+
+    allowed = [database_root(database["user_id"], database["id"], database.get("kind", "personal"))]
+    if database.get("kind") == "demo":
+        # У демо-базы (индекс COCO в старом формате) снимки лежат не внутри папки базы,
+        # а рядом с ней — в data/images. Границей служит папка, содержащая индекс:
+        # в рабочей установке это корень проекта, и за его пределы выйти всё равно нельзя.
+        allowed.append(get_settings().demo_index_dir.parent)
+        allowed.append(PROJECT_ROOT)
+
+    resolved = path.resolve()
+    if not any(resolved.is_relative_to(root.resolve()) for root in allowed) or not path.exists():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Файл недоступен")
     return path
 
@@ -173,7 +182,7 @@ def get_photo_file(database: OwnedDatabase, photo_id: str) -> FileResponse:
 # --------------------------------------------------------------------------
 
 @router.post("/photos", response_model=AddPhotosOut, status_code=status.HTTP_202_ACCEPTED)
-def add_photos(database: OwnedDatabase, files: list[UploadFile] = File(...)) -> AddPhotosOut:
+def add_photos(database: WritableDatabase, files: list[UploadFile] = File(...)) -> AddPhotosOut:
     if not files:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, "Не переданы файлы")
     if len(files) > MAX_UPLOAD_FILES:
@@ -201,7 +210,7 @@ def add_photos(database: OwnedDatabase, files: list[UploadFile] = File(...)) -> 
 
     if len(saved) <= SYNC_UPLOAD_LIMIT:
         try:
-            store = store_cache.get(database["user_id"], database["id"])
+            store = store_for(database)
             outcome = _index_files(store, saved, None, names)
             sync_stats(database["id"], store)
         finally:
@@ -210,14 +219,14 @@ def add_photos(database: OwnedDatabase, files: list[UploadFile] = File(...)) -> 
 
     def task(context: JobContext) -> str:
         try:
-            store = store_cache.get(database["user_id"], database["id"])
+            store = store_for(database)
             outcome = _index_files(store, saved, context, names)
             return f"Добавлено фото: {outcome['added']}, пропущено: {len(outcome['skipped'])}"
         finally:
             # папку чистим и при отмене, и при ошибке: временные файлы уже скопированы
             # внутрь базы, второй экземпляр никому не нужен
             shutil.rmtree(staging, ignore_errors=True)
-            store = store_cache.get(database["user_id"], database["id"])
+            store = store_for(database)
             sync_stats(database["id"], store)
 
     job = job_queue.submit(
@@ -235,7 +244,7 @@ def add_photos(database: OwnedDatabase, files: list[UploadFile] = File(...)) -> 
 # --------------------------------------------------------------------------
 
 @router.post("/import", response_model=AddPhotosOut, status_code=status.HTTP_202_ACCEPTED)
-def import_archive(database: OwnedDatabase, file: UploadFile = File(...)) -> AddPhotosOut:
+def import_archive(database: WritableDatabase, file: UploadFile = File(...)) -> AddPhotosOut:
     _require_idle(database)
     limits = _limits_for(database["user_id"])
     if limits.max_total_bytes == 0:
@@ -268,13 +277,13 @@ def import_archive(database: OwnedDatabase, file: UploadFile = File(...)) -> Add
             context.check_cancelled()
 
             context.set_message("Индексация")
-            store = store_cache.get(database["user_id"], database["id"])
+            store = store_for(database)
             outcome = _index_files(store, extracted.files, context)
             skipped = len(outcome["skipped"]) + len(extracted.skipped)
             return f"Добавлено фото: {outcome['added']}, пропущено: {skipped}"
         finally:
             shutil.rmtree(staging, ignore_errors=True)
-            store = store_cache.get(database["user_id"], database["id"])
+            store = store_for(database)
             sync_stats(database["id"], store)
 
     job = job_queue.submit(
@@ -292,16 +301,16 @@ def import_archive(database: OwnedDatabase, file: UploadFile = File(...)) -> Add
 # --------------------------------------------------------------------------
 
 @router.delete("/photos/{photo_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_photo(database: OwnedDatabase, photo_id: str) -> None:
-    store = store_cache.get(database["user_id"], database["id"])
+def delete_photo(database: WritableDatabase, photo_id: str) -> None:
+    store = store_for(database)
     if store.delete_photos([photo_id]) == 0:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Фото не найдено")
     sync_stats(database["id"], store)
 
 
 @router.post("/photos/delete")
-def delete_photos(database: OwnedDatabase, payload: DeletePhotosRequest) -> dict:
-    store = store_cache.get(database["user_id"], database["id"])
+def delete_photos(database: WritableDatabase, payload: DeletePhotosRequest) -> dict:
+    store = store_for(database)
     removed = store.delete_photos(payload.photo_ids)
     sync_stats(database["id"], store)
     return {"deleted": removed}

@@ -19,6 +19,10 @@ uvicorn[standard]>=0.30
 python-multipart>=0.0.9    # загрузка файлов и архивов
 argon2-cffi>=23.1          # хеширование паролей (argon2id)
 
+# --- Telegram-бот (живёт внутри этого же процесса, см. web/telegram_bot.py) ---
+aiogram>=3.10,<4.0
+aiohttp-socks>=0.8         # нужен aiogram для доступа к Telegram через прокси
+
 # --- ядро ---
 transformers>=4.40,<5.0    # см. README: раздел "Известные проблемы" про transformers 5.x
 faiss-cpu>=1.7.4

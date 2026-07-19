@@ -17,7 +17,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from web.deps import CurrentUser, OwnedDatabase
 from web.schemas import CaptionHitOut, SearchHitOut, SearchResultOut, SearchTextRequest
 from web.security import RateLimiter
-from web.stores import store_cache
+from web.stores import store_for
 
 router = APIRouter(prefix="/api/databases/{database_id}/search", tags=["search"])
 
@@ -50,7 +50,7 @@ def search_by_text(
     payload: SearchTextRequest, database: OwnedDatabase, user: CurrentUser
 ) -> SearchResultOut:
     _check_rate(user["id"])
-    store = store_cache.get(database["user_id"], database["id"])
+    store = store_for(database)
     used_query, hits = store.search_text(
         payload.query.strip(), top_k=payload.top_k, translate=payload.translate
     )
@@ -77,7 +77,7 @@ def search_by_image(
             status.HTTP_422_UNPROCESSABLE_CONTENT, "Файл не является изображением"
         ) from e
 
-    store = store_cache.get(database["user_id"], database["id"])
+    store = store_for(database)
     hits, captions = store.search_image(image, top_k=max(1, min(top_k, 50)))
     return SearchResultOut(
         results=_hits(database, hits),

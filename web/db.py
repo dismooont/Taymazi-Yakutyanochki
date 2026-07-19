@@ -49,6 +49,9 @@ CREATE TABLE IF NOT EXISTS databases (
     id           TEXT PRIMARY KEY,
     user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     name         TEXT NOT NULL,
+    kind         TEXT NOT NULL DEFAULT 'personal',  -- personal | chat | demo
+    telegram_chat_id TEXT UNIQUE,                   -- для kind='chat'
+    read_only    INTEGER NOT NULL DEFAULT 0,        -- демо-база: смотреть можно, менять нельзя
     photos_count INTEGER NOT NULL DEFAULT 0,
     photos_bytes INTEGER NOT NULL DEFAULT 0,
     index_bytes  INTEGER NOT NULL DEFAULT 0,
@@ -74,6 +77,15 @@ CREATE TABLE IF NOT EXISTS jobs (
     finished_at    TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_jobs_database ON jobs(database_id);
+
+-- Кто состоит в каком Telegram-чате. Записи заводит бот, когда видит сообщение
+-- от участника; веб по ним решает, показывать ли человеку базу чата.
+CREATE TABLE IF NOT EXISTS chat_members (
+    chat_id    TEXT NOT NULL,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    checked_at TEXT NOT NULL,
+    PRIMARY KEY (chat_id, user_id)
+);
 """
 
 
@@ -128,7 +140,12 @@ def init_db() -> None:
 # трогает уже созданную таблицу, поэтому на существующей базе их надо добавить
 # отдельно — иначе обновление приложения ломает рабочий стенд.
 LATER_COLUMNS = {
-    "databases": {"preview": "TEXT NOT NULL DEFAULT ''"},
+    "databases": {
+        "preview": "TEXT NOT NULL DEFAULT ''",
+        "kind": "TEXT NOT NULL DEFAULT 'personal'",
+        "telegram_chat_id": "TEXT",
+        "read_only": "INTEGER NOT NULL DEFAULT 0",
+    },
 }
 
 
@@ -254,15 +271,30 @@ def purge_expired_sessions() -> int:
 # Базы
 # --------------------------------------------------------------------------
 
-def create_database(user_id: str, name: str) -> dict[str, Any]:
+def create_database(user_id: str, name: str, *, kind: str = "personal",
+                    telegram_chat_id: str | None = None, read_only: bool = False) -> dict[str, Any]:
     database_id = new_id()
     with connect() as conn:
         conn.execute(
-            "INSERT INTO databases (id, user_id, name, created_at, updated_at)"
-            " VALUES (?, ?, ?, ?, ?)",
-            (database_id, user_id, name, now(), now()),
+            "INSERT INTO databases (id, user_id, name, kind, telegram_chat_id, read_only,"
+            " created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (database_id, user_id, name, kind, telegram_chat_id, int(read_only), now(), now()),
         )
     return get_database(database_id)
+
+
+def get_database_by_chat(telegram_chat_id: str) -> dict[str, Any] | None:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM databases WHERE telegram_chat_id = ?", (str(telegram_chat_id),)
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def get_demo_database() -> dict[str, Any] | None:
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM databases WHERE kind = 'demo' LIMIT 1").fetchone()
+    return dict(row) if row else None
 
 
 def get_database(database_id: str) -> dict[str, Any] | None:
@@ -272,18 +304,56 @@ def get_database(database_id: str) -> dict[str, Any] | None:
 
 
 def list_databases(user_id: str) -> list[dict[str, Any]]:
+    """
+    Свои базы, базы чатов, где пользователь состоит, и общая демо-база.
+    Демо идёт последней: это витрина, а не рабочая база.
+    """
     with connect() as conn:
         rows = conn.execute(
-            "SELECT * FROM databases WHERE user_id = ? ORDER BY created_at DESC", (user_id,)
+            "SELECT DISTINCT d.* FROM databases d"
+            " LEFT JOIN chat_members m ON m.chat_id = d.telegram_chat_id AND m.user_id = ?"
+            " WHERE d.user_id = ? OR m.user_id IS NOT NULL OR d.kind = 'demo'"
+            " ORDER BY (d.kind = 'demo'), d.created_at DESC",
+            (user_id, user_id),
         ).fetchall()
     return [dict(row) for row in rows]
 
 
 def count_databases(user_id: str) -> int:
+    """Только личные базы: квота считает то, что человек создал сам."""
     with connect() as conn:
         return conn.execute(
-            "SELECT COUNT(*) FROM databases WHERE user_id = ?", (user_id,)
+            "SELECT COUNT(*) FROM databases WHERE user_id = ? AND kind = 'personal'", (user_id,)
         ).fetchone()[0]
+
+
+# --------------------------------------------------------------------------
+# Участники чатов
+# --------------------------------------------------------------------------
+
+def remember_chat_member(chat_id: str, user_id: str) -> None:
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO chat_members (chat_id, user_id, checked_at) VALUES (?, ?, ?)"
+            " ON CONFLICT(chat_id, user_id) DO UPDATE SET checked_at = excluded.checked_at",
+            (str(chat_id), user_id, now()),
+        )
+
+
+def forget_chat_member(chat_id: str, user_id: str) -> None:
+    with connect() as conn:
+        conn.execute(
+            "DELETE FROM chat_members WHERE chat_id = ? AND user_id = ?", (str(chat_id), user_id)
+        )
+
+
+def get_chat_member(chat_id: str, user_id: str) -> dict[str, Any] | None:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM chat_members WHERE chat_id = ? AND user_id = ?",
+            (str(chat_id), user_id),
+        ).fetchone()
+    return dict(row) if row else None
 
 
 def user_total_bytes(user_id: str) -> int:

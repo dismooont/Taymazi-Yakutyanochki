@@ -21,6 +21,13 @@ def app_env(tmp_path, monkeypatch, holder):
     monkeypatch.setenv("REGISTRATION_OPEN", "1")
     monkeypatch.setenv("PUBLIC_URL", "http://localhost:5173")
     monkeypatch.setenv("MIN_PASSWORD_LENGTH", "10")
+    # Демо-база подключается, только если указанный индекс существует. В тестах путь
+    # заведомо пустой: иначе настоящий индекс COCO из index/ подмешивался бы в списки
+    # баз и ломал проверки, а тесты зависели бы от машины, на которой запущены.
+    monkeypatch.setenv("DEMO_INDEX_DIR", str(tmp_path / "no-demo"))
+    # Бот живёт в том же процессе. Без этого тесты, задающие токен, полезли бы
+    # в настоящий Telegram.
+    monkeypatch.setenv("TELEGRAM_BOT_ENABLED", "0")
     reset_settings()
     login_limiter.clear()
     register_limiter.clear()

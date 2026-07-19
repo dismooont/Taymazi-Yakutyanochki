@@ -72,15 +72,43 @@ def get_current_user(
 CurrentUser = Annotated[dict, Depends(get_current_user)]
 
 
+def may_read(database: dict[str, Any], user: dict[str, Any]) -> bool:
+    """
+    Читать базу может её владелец, участник чата, к которому она привязана,
+    и кто угодно — демо-базу.
+    """
+    if database["user_id"] == user["id"]:
+        return True
+    if database.get("kind") == "demo":
+        return True
+    if database.get("kind") == "chat" and database.get("telegram_chat_id"):
+        return db.get_chat_member(database["telegram_chat_id"], user["id"]) is not None
+    return False
+
+
 def get_owned_database(database_id: str, user: CurrentUser) -> dict[str, Any]:
     """
-    Возвращает базу пользователя. Чужая и несуществующая база дают одинаковый 404:
-    иначе по коду ответа можно перебирать существующие id.
+    Возвращает базу, доступную пользователю. Чужая и несуществующая база дают
+    одинаковый 404: иначе по коду ответа можно перебирать существующие id.
     """
     database = db.get_database(database_id)
-    if database is None or database["user_id"] != user["id"]:
+    if database is None or not may_read(database, user):
         raise HTTPException(status.HTTP_404_NOT_FOUND, "База не найдена")
     return database
 
 
 OwnedDatabase = Annotated[dict, Depends(get_owned_database)]
+
+
+def get_writable_database(database: OwnedDatabase) -> dict[str, Any]:
+    """
+    То же, но для операций, меняющих базу. Демо-база открыта всем на чтение,
+    поэтому разрешить в ней удаление означало бы отдать общий датасет на растерзание
+    первому желающему.
+    """
+    if database.get("read_only"):
+        raise HTTPException(status.HTTP_403_FORBIDDEN, "База доступна только для чтения")
+    return database
+
+
+WritableDatabase = Annotated[dict, Depends(get_writable_database)]

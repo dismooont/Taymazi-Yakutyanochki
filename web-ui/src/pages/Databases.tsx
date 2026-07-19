@@ -149,7 +149,14 @@ export function Databases() {
                 </div>
               )}
               <div>
-                <p className="entry__name">{database.name}</p>
+                <p className="entry__name">
+                  {database.name}
+                  {database.kind !== 'personal' && (
+                    <span className="tag">
+                      {database.kind === 'chat' ? 'чат' : 'только чтение'}
+                    </span>
+                  )}
+                </p>
                 <p className="entry__meta mono">
                   {formatPhotos(database.photos_count)} · {formatBytes(database.total_bytes)} ·
                   создана {formatDate(database.created_at)}
@@ -164,14 +171,18 @@ export function Databases() {
               >
                 Открыть
               </button>
-              <button
-                type="button"
-                className="btn btn--quiet btn--danger"
-                onClick={() => remove(database)}
-                aria-label={`Удалить базу ${database.name}`}
-              >
-                Удалить
-              </button>
+              {/* демо-база общая: предлагать её удаление означало бы обещать
+                  действие, которое сервер всё равно отклонит */}
+              {!database.read_only && (
+                <button
+                  type="button"
+                  className="btn btn--quiet btn--danger"
+                  onClick={() => remove(database)}
+                  aria-label={`Удалить базу ${database.name}`}
+                >
+                  Удалить
+                </button>
+              )}
             </div>
           </div>
         ))}

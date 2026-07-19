@@ -28,6 +28,9 @@ export interface Database {
   total_bytes: number
   has_captions: boolean
   status: string
+  /** personal — своя база, chat — база Telegram-чата, demo — общая витрина */
+  kind: 'personal' | 'chat' | 'demo'
+  read_only: boolean
   /** photo_id первых снимков — для превью в списке баз */
   preview: string[]
   created_at: string

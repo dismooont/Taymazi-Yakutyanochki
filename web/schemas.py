@@ -55,6 +55,10 @@ class DatabaseOut(BaseModel):
     total_bytes: int
     has_captions: bool
     status: str
+    # kind и read_only нужны интерфейсу, чтобы не предлагать действий, которые
+    # заведомо получат отказ: у демо-базы нет ни удаления, ни добавления снимков
+    kind: str = "personal"
+    read_only: bool = False
     preview: list[str] = Field(default_factory=list)
     created_at: str
     updated_at: str
@@ -63,6 +67,8 @@ class DatabaseOut(BaseModel):
     def from_row(cls, row: dict) -> "DatabaseOut":
         raw_preview = row.get("preview") or ""
         return cls(
+            kind=row.get("kind") or "personal",
+            read_only=bool(row.get("read_only")),
             preview=[pid for pid in raw_preview.split(",") if pid],
             id=row["id"],
             name=row["name"],
