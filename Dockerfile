@@ -16,6 +16,9 @@ RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/wh
 COPY bot/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# core/ обязателен: после выделения ядра (docs/WEB_PLAN.md, этап M0) src/ и bot/
+# импортируют его, и без этой строки контейнер падает на старте с ImportError.
+COPY core/ core/
 COPY src/ src/
 COPY bot/ bot/
 

@@ -21,6 +21,30 @@ def settings_dep() -> Settings:
     return get_settings()
 
 
+def client_ip(request: Request) -> str:
+    """
+    IP клиента с учётом обратного прокси.
+
+    Без этого в продакшене ограничение частоты входа превращается в отказ в
+    обслуживании: за nginx все запросы приходят с одного адреса (адреса контейнера),
+    поэтому пятая неудачная попытка входа любого пользователя заблокировала бы вход
+    сразу всем.
+
+    X-Real-IP берётся первым: nginx проставляет его сам и всегда перезаписывает,
+    поэтому подделать его клиент не может. В X-Forwarded-For доверяем только
+    последнему элементу — его дописывает прокси, всё, что левее, пришло от клиента
+    и может быть выдумано.
+    """
+    if get_settings().trust_proxy:
+        real_ip = request.headers.get("x-real-ip")
+        if real_ip:
+            return real_ip.strip()
+        forwarded = request.headers.get("x-forwarded-for")
+        if forwarded:
+            return forwarded.split(",")[-1].strip()
+    return request.client.host if request.client else "unknown"
+
+
 def get_current_user(
     request: Request,
     session: Annotated[str | None, Cookie(alias=SESSION_COOKIE)] = None,

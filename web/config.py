@@ -39,6 +39,7 @@ class Settings:
     max_photos_per_db: int
     max_bytes_per_user: int
     min_password_length: int
+    trust_proxy: bool
 
     @property
     def db_path(self) -> Path:
@@ -77,6 +78,10 @@ def get_settings() -> Settings:
         max_photos_per_db=_int("MAX_PHOTOS_PER_DB", 5000),
         max_bytes_per_user=_int("MAX_BYTES_PER_USER", 3 * 1024 ** 3),
         min_password_length=_int("MIN_PASSWORD_LENGTH", 10),
+        # Включать ТОЛЬКО когда перед приложением действительно стоит обратный прокси,
+        # который сам проставляет X-Real-IP. Иначе клиент подделает заголовок и обойдёт
+        # ограничение частоты входа.
+        trust_proxy=_flag("TRUST_PROXY", False),
     )
 
 

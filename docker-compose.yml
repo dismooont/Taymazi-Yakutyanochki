@@ -1,11 +1,15 @@
-# Запуск бота: docker compose up -d --build
+# Запуск: docker compose up -d --build
 #
-# Индекс и данные монтируются как volume (не запекаются в образ) — так команда
-# add / присланные пользователем фото сразу сохраняются на диск хоста и переживают
-# пересборку контейнера (README, раздел 9.5).
+# Три сервиса:
+#   bot — Telegram-бот со своим общим индексом (index/)
+#   web — веб-API, у каждого пользователя своя база в data/users/
+#   ui  — nginx: собранный фронтенд плюс проксирование /api на web
 #
-# Данные COCO (data/images) монтируются, потому что бот отдаёт найденные картинки
-# по путям из индекса — файлы должны быть доступны контейнеру.
+# Бот и веб независимы, можно поднять только нужное:
+#   docker compose up -d web ui
+#
+# Индекс и данные монтируются как volume (не запекаются в образ) — так добавленные
+# фото сразу сохраняются на диск хоста и переживают пересборку контейнера.
 
 services:
   bot:
@@ -22,3 +26,36 @@ services:
       - ./index:/app/index                 # FAISS-индекс (растёт при добавлении фото)
       - ./data/images:/app/data/images:ro  # изображения COCO (только чтение)
       - ./data/user_photos:/app/data/user_photos  # присланные пользователем фото
+
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.web
+      args:
+        HTTP_PROXY: ${BUILD_HTTP_PROXY:-}
+        HTTPS_PROXY: ${BUILD_HTTPS_PROXY:-}
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      # Приложение стоит за nginx, поэтому берёт IP клиента из X-Real-IP. Без этого
+      # ограничение частоты входа считало бы всех пользователей одним адресом
+      # (адресом контейнера nginx), и пятая неудачная попытка кого угодно закрывала
+      # бы вход сразу всем.
+      TRUST_PROXY: "1"
+      DATA_DIR: /app/data
+    volumes:
+      # Базы пользователей и app.db переживают пересборку контейнера.
+      - ./data:/app/data
+    # Порт наружу не публикуется: снаружи доступен только nginx.
+    expose:
+      - "8000"
+
+  ui:
+    build:
+      context: .
+      dockerfile: Dockerfile.ui
+    restart: unless-stopped
+    depends_on:
+      - web
+    ports:
+      - "${WEB_PORT:-8080}:80"

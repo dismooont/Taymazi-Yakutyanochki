@@ -14,7 +14,7 @@ from fastapi import APIRouter, HTTPException, Request, Response, status
 
 from web import db
 from web.config import get_settings
-from web.deps import CurrentUser
+from web.deps import CurrentUser, client_ip
 from web.schemas import LoginRequest, PasswordChangeRequest, RegisterRequest, UserOut
 from web.security import (
     SESSION_COOKIE,
@@ -36,10 +36,6 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 INVALID_CREDENTIALS = "Неверный логин или пароль"
 # именованная константа starlette переехала между версиями — держим числом
 HTTP_422 = 422
-
-
-def _client_ip(request: Request) -> str:
-    return request.client.host if request.client else "unknown"
 
 
 def _user_out(user: dict[str, Any]) -> UserOut:
@@ -87,7 +83,7 @@ def register(payload: RegisterRequest, request: Request, response: Response) -> 
     if not settings.registration_open:
         raise HTTPException(status.HTTP_403_FORBIDDEN, "Регистрация закрыта")
 
-    if not register_limiter.check(_client_ip(request)):
+    if not register_limiter.check(client_ip(request)):
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Слишком много регистраций, подождите")
 
     try:
@@ -112,7 +108,7 @@ def register(payload: RegisterRequest, request: Request, response: Response) -> 
 @router.post("/login", response_model=UserOut)
 def login(payload: LoginRequest, request: Request, response: Response) -> UserOut:
     login_name = normalize_login(payload.login)
-    keys = (f"login:{login_name}", f"ip:{_client_ip(request)}")
+    keys = (f"login:{login_name}", f"ip:{client_ip(request)}")
     if not all(login_limiter.check(key) for key in keys):
         raise HTTPException(
             status.HTTP_429_TOO_MANY_REQUESTS,

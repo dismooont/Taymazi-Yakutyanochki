@@ -1,14 +1,28 @@
-# Зависимости веб-приложения (web/). Ядро core/ тянет свои из requirements.txt.
+# Зависимости веб-приложения (web/ + core/).
+#
+# Список намеренно самостоятельный, а не "-r requirements.txt": вебу не нужны
+# matplotlib (визуализация только в CLI) и pandas (чтение CSV с подписями COCO),
+# а в образе это лишние десятки мегабайт.
+#
+# torch ставится отдельно в Dockerfile.web (CPU-only сборка), здесь его нет —
+# иначе подтянется тяжёлая CUDA-версия.
 #
 # Запуск в разработке:
-#   pip install -r requirements-web.txt
+#   pip install torch -r requirements-web.txt
 #   uvicorn web.app:app --reload --port 8000
 # Только один воркер: веса CLIP занимают ~600 МБ на процесс, а несколько воркеров
 # писали бы в один FAISS-индекс наперегонки (docs/WEB_PLAN.md, раздел 2).
 
--r requirements.txt
-
+# --- веб ---
 fastapi>=0.115
 uvicorn[standard]>=0.30
-python-multipart>=0.0.9    # загрузка файлов и архивов (этапы M2-M3)
+python-multipart>=0.0.9    # загрузка файлов и архивов
 argon2-cffi>=23.1          # хеширование паролей (argon2id)
+
+# --- ядро ---
+transformers>=4.40,<5.0    # см. README: раздел "Известные проблемы" про transformers 5.x
+faiss-cpu>=1.7.4
+pillow>=10.0
+numpy>=1.24
+tqdm>=4.65
+deep-translator>=1.11      # перевод текстовых запросов RU->EN
