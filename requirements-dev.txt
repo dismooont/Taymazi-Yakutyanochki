@@ -1,0 +1,7 @@
+# Зависимости для запуска тестов: pip install -r requirements-dev.txt
+# Тесты не грузят веса CLIP (см. tests/conftest.py), поэтому torch/transformers
+# нужны только как импорты — они уже в requirements.txt.
+
+-r requirements.txt
+
+pytest>=8.0

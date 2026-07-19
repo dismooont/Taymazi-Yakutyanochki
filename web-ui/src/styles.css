@@ -1,0 +1,652 @@
+/*
+  Оформление: тёмный сланец плюс янтарь — безопасный свет фотолаборатории.
+  Тёмный фон здесь не мода, а функция: снимки на нейтральном тёмном читаются лучше,
+  чем на светлом, где интерфейс спорит с содержимым.
+
+  Янтарный цвет зарезервирован под одно значение — близость результата к запросу.
+  Больше он не появляется нигде, поэтому взгляд сразу считывает, где мера, а где
+  просто интерфейс.
+*/
+
+:root {
+  --void: #0f151b;
+  --panel: #182029;
+  --panel-hi: #202b36;
+  --rule: #2b3844;
+  --text: #e7eef4;
+  --muted: #90a3b4;
+  --signal: #f0b429;
+  --danger: #e5605f;
+
+  --display: 'Arial Narrow', 'Helvetica Neue', 'Segoe UI', system-ui, sans-serif;
+  --body: system-ui, 'Segoe UI', Roboto, sans-serif;
+  --mono: ui-monospace, 'Cascadia Mono', Consolas, 'SF Mono', monospace;
+
+  --gap: 20px;
+  --radius: 3px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--void);
+  color: var(--text);
+  font-family: var(--body);
+  font-size: 15px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* --- типографика ---------------------------------------------------- */
+
+.eyebrow {
+  font-family: var(--display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.title {
+  font-family: var(--display);
+  font-size: clamp(28px, 4vw, 44px);
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  line-height: 1.05;
+  margin: 0;
+}
+
+.mono {
+  font-family: var(--mono);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- каркас --------------------------------------------------------- */
+
+.shell {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+.topbar {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 14px clamp(16px, 4vw, 40px);
+  border-bottom: 1px solid var(--rule);
+  background: var(--panel);
+}
+
+.topbar__mark {
+  font-family: var(--display);
+  font-weight: 700;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  font-size: 13px;
+}
+
+.topbar__spacer {
+  flex: 1;
+}
+
+.page {
+  flex: 1;
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: clamp(24px, 5vw, 56px) clamp(16px, 4vw, 40px) 80px;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap);
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+/* --- элементы управления -------------------------------------------- */
+
+.btn {
+  font-family: var(--display);
+  font-size: 13px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--text);
+  background: var(--panel-hi);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 10px 18px;
+  cursor: pointer;
+  transition: background 0.15s ease, border-color 0.15s ease;
+  text-decoration: none;
+  display: inline-block;
+}
+
+.btn:hover:not(:disabled) {
+  background: #27333f;
+  border-color: #3b4a58;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btn--primary {
+  background: var(--text);
+  color: var(--void);
+  border-color: var(--text);
+}
+
+.btn--primary:hover:not(:disabled) {
+  background: #fff;
+  border-color: #fff;
+}
+
+.btn--quiet {
+  background: transparent;
+  border-color: transparent;
+  color: var(--muted);
+  padding-inline: 8px;
+}
+
+.btn--quiet:hover:not(:disabled) {
+  background: var(--panel-hi);
+  color: var(--text);
+}
+
+.btn--danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  color: var(--danger);
+  background: transparent;
+}
+
+.field {
+  width: 100%;
+  background: var(--void);
+  color: var(--text);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 12px 14px;
+  font-family: var(--body);
+  font-size: 15px;
+}
+
+.field::placeholder {
+  color: #5f7385;
+}
+
+.label {
+  display: block;
+  font-family: var(--display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.note {
+  color: var(--muted);
+  font-size: 14px;
+  margin: 0;
+}
+
+.error {
+  color: var(--danger);
+  font-size: 14px;
+  margin: 0;
+}
+
+/* --- вход ----------------------------------------------------------- */
+
+.auth {
+  max-width: 380px;
+  margin: clamp(40px, 12vh, 120px) auto;
+  padding-inline: 20px;
+}
+
+.tabs {
+  display: flex;
+  gap: 2px;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 2px;
+  background: var(--panel);
+}
+
+.tabs__item {
+  flex: 1;
+  font-family: var(--display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  padding: 9px 10px;
+  background: transparent;
+  color: var(--muted);
+  border: 0;
+  border-radius: 2px;
+  cursor: pointer;
+}
+
+.tabs__item[aria-selected='true'] {
+  background: var(--panel-hi);
+  color: var(--text);
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.divider::before,
+.divider::after {
+  content: '';
+  flex: 1;
+  height: 1px;
+  background: var(--rule);
+}
+
+/* --- список баз ------------------------------------------------------ */
+
+.entry {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 12px 20px;
+  align-items: center;
+  padding: 18px 20px;
+  background: var(--panel);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  text-decoration: none;
+  color: inherit;
+}
+
+.entry:hover {
+  border-color: #3b4a58;
+  background: var(--panel-hi);
+}
+
+.entry__main {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-width: 0;
+}
+
+.entry__preview {
+  display: flex;
+  flex-shrink: 0;
+}
+
+.entry__preview img {
+  width: 44px;
+  height: 44px;
+  object-fit: cover;
+  border: 1px solid var(--void);
+  border-radius: 2px;
+  margin-left: -10px;
+}
+
+.entry__preview img:first-child {
+  margin-left: 0;
+}
+
+.entry__name {
+  font-family: var(--display);
+  font-size: 22px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  margin: 0;
+}
+
+.tag {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 2px 8px;
+  border: 1px solid var(--rule);
+  border-radius: 2px;
+  font-family: var(--display);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  vertical-align: middle;
+}
+
+.entry__meta {
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+.starters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: var(--gap);
+}
+
+.starter {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 26px 24px;
+  background: var(--panel);
+  border: 1px dashed var(--rule);
+  border-radius: var(--radius);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+}
+
+.starter:hover,
+.starter[data-over='true'] {
+  border-color: var(--signal);
+  background: var(--panel-hi);
+}
+
+.starter__title {
+  font-family: var(--display);
+  font-size: 20px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin: 10px 0 6px;
+}
+
+/* --- рабочая область ------------------------------------------------- */
+
+.masthead {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 20px;
+  flex-wrap: wrap;
+  padding-bottom: 18px;
+  border-bottom: 1px solid var(--rule);
+}
+
+/*
+  Поле запроса подано как показание прибора: под ним печатается строка, реально
+  ушедшая в CLIP. Обычно перевод прячут, но именно он объясняет, почему нашлось
+  это, а не то.
+*/
+.console {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 16px;
+}
+
+.console__row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.console__row .field {
+  flex: 1;
+  min-width: 200px;
+}
+
+/* компактная зона перетаскивания: кнопка, которая принимает и брошенный файл */
+.drop {
+  border-style: dashed;
+}
+
+.drop[data-over='true'] {
+  border-color: var(--signal);
+  color: var(--signal);
+}
+
+.console__alt {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 14px;
+}
+
+.console__readout {
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px dashed var(--rule);
+  color: var(--muted);
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  flex-wrap: wrap;
+}
+
+.console__sent {
+  color: var(--signal);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 16px;
+}
+
+.card {
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  background: var(--panel);
+  overflow: hidden;
+  position: relative;
+}
+
+.card__frame {
+  display: block;
+  aspect-ratio: 1;
+  width: 100%;
+  background: #0b1015;
+  border: 0;
+  padding: 0;
+  cursor: zoom-in;
+}
+
+.card__frame img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.card__foot {
+  padding: 8px 10px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.card__id {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+/*
+  Полоса близости — единственное место, где появляется янтарь. Длина линии равна
+  близости результата относительно первого места, рядом стоит сырое значение
+  косинуса. Показывать «97 % совпадения» было бы враньём: у CLIP осмысленные
+  значения лежат около 0,2–0,3, и это свойство модели, а не недостаток выдачи.
+*/
+.proximity {
+  height: 2px;
+  background: var(--rule);
+}
+
+.proximity__fill {
+  height: 100%;
+  background: var(--signal);
+}
+
+.card__score {
+  font-family: var(--mono);
+  font-size: 12px;
+  color: var(--signal);
+  font-variant-numeric: tabular-nums;
+}
+
+.card__remove {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: 2px;
+  border: 1px solid var(--rule);
+  background: rgba(15, 21, 27, 0.85);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  opacity: 0;
+}
+
+.card:hover .card__remove,
+.card__remove:focus-visible {
+  opacity: 1;
+}
+
+.card__remove:hover {
+  color: var(--danger);
+  border-color: var(--danger);
+}
+
+/* --- прогресс -------------------------------------------------------- */
+
+.job {
+  border: 1px solid var(--rule);
+  border-left: 2px solid var(--signal);
+  border-radius: var(--radius);
+  background: var(--panel);
+  padding: 14px 16px;
+}
+
+.job__bar {
+  height: 3px;
+  background: var(--rule);
+  margin-top: 10px;
+}
+
+.job__fill {
+  height: 100%;
+  background: var(--signal);
+  transition: width 0.3s ease;
+}
+
+/* --- пустые состояния и служебное ------------------------------------ */
+
+.empty {
+  border: 1px dashed var(--rule);
+  border-radius: var(--radius);
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.lightbox {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 12, 16, 0.94);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 32px;
+  border: 0;
+  z-index: 10;
+  cursor: zoom-out;
+}
+
+.lightbox img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.skeleton {
+  background: var(--panel-hi);
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 24px;
+  transform: translateX(-50%);
+  background: var(--panel-hi);
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  padding: 12px 18px;
+  z-index: 20;
+  max-width: min(520px, calc(100vw - 32px));
+}
+
+@media (max-width: 620px) {
+  .masthead {
+    align-items: flex-start;
+  }
+
+  .entry {
+    grid-template-columns: 1fr;
+  }
+
+  /* на узком экране 190px дают одну колонку и снимки размером в пол-экрана —
+     для просмотра архива полезнее видеть их по два в ряд */
+  .grid {
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    gap: 10px;
+  }
+}

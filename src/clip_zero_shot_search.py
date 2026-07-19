@@ -1,5 +1,13 @@
 """
-Zero-Shot Image <-> Text Search на базе CLIP + FAISS.
+Zero-Shot Image <-> Text Search на базе CLIP + FAISS — CLI-интерфейс.
+
+Начиная с рефакторинга под веб-версию (docs/WEB_PLAN.md, этап M0) вся собственно логика
+живёт в пакете core/: модель (core.model), эмбеддинги (core.embeddings), перевод
+(core.translate) и работа с базой (core.store). Этот модуль — тонкая обёртка: он отвечает
+за разбор аргументов, формат датасета MS COCO (image_id -> имя файла) и визуализацию.
+
+Функции с прежними именами и сигнатурами сохранены: на них опираются bot/inference.py
+и scripts/eval_recall.py.
 
 Что делает скрипт:
   1. build   — читает изображения + CSV с подписями, считает эмбеддинги CLIP,
@@ -13,16 +21,6 @@ Zero-Shot Image <-> Text Search на базе CLIP + FAISS.
   images_dir/*.jpg
   captions.csv  с колонками: image_id, caption_en, caption_ru (caption_ru опционален)
   image_id должен совпадать с именем файла без расширения, например image_id=139 -> 139.jpg
-  (при необходимости поправьте функцию image_id_to_filename под свой датасет).
-
-Установка зависимостей:
-  pip install torch transformers faiss-cpu pillow pandas tqdm matplotlib --break-system-packages
-  # для перевода запросов (опционально, deep-translator не конфликтует с huggingface_hub):
-  pip install deep-translator --break-system-packages
-
-По умолчанию команды text/image сохраняют коллаж с найденными картинками
-в PNG-файл внутри index_dir (search_result_text.png / search_result_image.png).
-Отключить сохранение: добавить флаг --no_plot.
 
 Примеры запуска:
   python clip_zero_shot_search.py build \
@@ -30,9 +28,6 @@ Zero-Shot Image <-> Text Search на базе CLIP + FAISS.
 
   python clip_zero_shot_search.py add \
       --images_dir ./data/new_photos --index_dir ./index
-
-  python clip_zero_shot_search.py text \
-      --index_dir ./index --query "a dog playing in the snow" --top_k 5
 
   python clip_zero_shot_search.py text \
       --index_dir ./index --query "собака играет в снегу" --translate --top_k 5
@@ -43,26 +38,34 @@ Zero-Shot Image <-> Text Search на базе CLIP + FAISS.
 
 import argparse
 import json
-import os
 import sys
 from pathlib import Path
 
 import numpy as np
 import pandas as pd
-import torch
 from PIL import Image
-from tqdm import tqdm
-from transformers import CLIPModel, CLIPProcessor
+from tqdm import tqdm  # noqa: F401  (оставлен для обратной совместимости импортов)
+
+# --- корень проекта в sys.path, чтобы работал "import core" при любом способе запуска ---
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 try:
     import faiss
 except ImportError:
     sys.exit("Не найден faiss. Установите: pip install faiss-cpu --break-system-packages")
 
-
-MODEL_NAME = "openai/clip-vit-base-patch32"
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-BATCH_SIZE = 32
+from core import embeddings as _embeddings  # noqa: E402
+from core.model import (  # noqa: E402,F401
+    BATCH_SIZE,
+    DEVICE,
+    MODEL_NAME,
+    extract_features_tensor,
+    load_model,
+)
+from core.store import normalize_id  # noqa: E402,F401
+from core.translate import TRANSLATE_CACHE_FILE, translate_ru_to_en  # noqa: E402,F401
 
 
 # --------------------------------------------------------------------------
@@ -100,36 +103,24 @@ def image_id_to_filename(image_id, filename_index: dict) -> Path:
 
 
 def normalize(vectors: np.ndarray) -> np.ndarray:
-    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
-    norms[norms == 0] = 1e-8
-    return vectors / norms
+    """Устаревшее: используйте core.model.l2_normalize."""
+    from core.model import l2_normalize
+
+    return l2_normalize(vectors)
 
 
-def load_model():
-    print(f"Загрузка модели {MODEL_NAME} на {DEVICE}...")
-    model = CLIPModel.from_pretrained(MODEL_NAME).to(DEVICE).eval()
-    processor = CLIPProcessor.from_pretrained(MODEL_NAME)
-    return model, processor
-
-
-def extract_features_tensor(output):
+def compute_image_embeddings(model, processor, image_paths, show_progress: bool = True):
     """
-    Совместимость между версиями transformers:
-    - в transformers < 5.0 get_image_features/get_text_features возвращают torch.Tensor напрямую
-    - в transformers >= 5.0 возвращается объект BaseModelOutputWithPooling
-    Извлекаем сам тензор эмбеддинга независимо от версии.
+    Совместимая сигнатура: model/processor игнорируются, потому что core.embeddings
+    берёт их из синглтона ModelHolder (то есть это ровно те же объекты, что вернул
+    load_model() — вторая копия весов в память не грузится).
     """
-    if torch.is_tensor(output):
-        return output
-    for attr in ("pooler_output", "image_embeds", "text_embeds", "last_hidden_state"):
-        if hasattr(output, attr):
-            tensor = getattr(output, attr)
-            if tensor is not None:
-                # last_hidden_state имеет форму (batch, seq_len, dim) -> берём CLS-токен
-                if attr == "last_hidden_state" and tensor.dim() == 3:
-                    tensor = tensor[:, 0, :]
-                return tensor
-    raise TypeError(f"Не удалось извлечь тензор эмбеддинга из объекта типа {type(output)}")
+    return _embeddings.compute_image_embeddings(image_paths, show_progress=show_progress)
+
+
+def compute_text_embeddings(model, processor, texts, show_progress: bool = True):
+    """См. compute_image_embeddings — та же обёртка для текстов."""
+    return _embeddings.compute_text_embeddings(texts, show_progress=show_progress)
 
 
 def visualize_images(items, scores, out_path, title, captions=None):
@@ -139,8 +130,9 @@ def visualize_images(items, scores, out_path, title, captions=None):
     captions: опционально — список подписей под каждой картинкой (напр. caption для image->text)
     """
     # matplotlib импортируется лениво: он нужен только для CLI-визуализации,
-    # а боту (bot/inference.py) не требуется — так образ Docker остаётся лёгким.
+    # а боту и вебу не требуется — так образ Docker остаётся лёгким.
     import matplotlib
+
     matplotlib.use("Agg")  # без GUI: сохраняем результат в файл, не пытаемся открыть окно
     import matplotlib.pyplot as plt
 
@@ -178,31 +170,6 @@ def visualize_images(items, scores, out_path, title, captions=None):
 # Построение индекса
 # --------------------------------------------------------------------------
 
-def compute_image_embeddings(model, processor, image_paths):
-    embeddings = []
-    with torch.no_grad():
-        for i in tqdm(range(0, len(image_paths), BATCH_SIZE), desc="Эмбеддинги изображений"):
-            batch_paths = image_paths[i:i + BATCH_SIZE]
-            images = [Image.open(p).convert("RGB") for p in batch_paths]
-            inputs = processor(images=images, return_tensors="pt").to(DEVICE)
-            feats = extract_features_tensor(model.get_image_features(**inputs))
-            embeddings.append(feats.cpu().numpy())
-    return normalize(np.concatenate(embeddings, axis=0)).astype("float32")
-
-
-def compute_text_embeddings(model, processor, texts):
-    embeddings = []
-    with torch.no_grad():
-        for i in tqdm(range(0, len(texts), BATCH_SIZE), desc="Эмбеддинги текстов"):
-            batch = texts[i:i + BATCH_SIZE]
-            inputs = processor(
-                text=batch, return_tensors="pt", padding=True, truncation=True
-            ).to(DEVICE)
-            feats = extract_features_tensor(model.get_text_features(**inputs))
-            embeddings.append(feats.cpu().numpy())
-    return normalize(np.concatenate(embeddings, axis=0)).astype("float32")
-
-
 def build_index(images_dir: str, captions_csv: str, index_dir: str):
     images_dir = Path(images_dir)
     index_dir = Path(index_dir)
@@ -233,7 +200,6 @@ def build_index(images_dir: str, captions_csv: str, index_dir: str):
 
     # --- эмбеддинги картинок (одна запись на уникальный image_id) ---
     image_embs = compute_image_embeddings(model, processor, image_paths)
-    faiss.normalize_L2(image_embs)
     image_index = faiss.IndexFlatIP(image_embs.shape[1])
     image_index.add(image_embs)
     faiss.write_index(image_index, str(index_dir / "images.index"))
@@ -247,7 +213,6 @@ def build_index(images_dir: str, captions_csv: str, index_dir: str):
     # --- эмбеддинги подписей (по одной записи на каждую подпись, 5 на картинку) ---
     captions = df["caption_en"].astype(str).tolist()
     text_embs = compute_text_embeddings(model, processor, captions)
-    faiss.normalize_L2(text_embs)
     text_index = faiss.IndexFlatIP(text_embs.shape[1])
     text_index.add(text_embs)
     faiss.write_index(text_index, str(index_dir / "captions.index"))
@@ -261,17 +226,6 @@ def build_index(images_dir: str, captions_csv: str, index_dir: str):
     print(f"Готово: {len(valid_ids)} изображений, {len(captions)} подписей -> {index_dir}")
 
 
-def normalize_id(value) -> str:
-    """
-    Приводит числовой id к каноничному виду без ведущих нулей (как хранится
-    после чтения CSV через pandas), чтобы '000000000139' и '139' считались
-    одним и тем же image_id при дедупликации. Нечисловые id (например,
-    Telegram file_id) возвращаются как есть.
-    """
-    s = str(value)
-    return str(int(s)) if s.isdigit() else s
-
-
 def add_to_index(images_dir: str, index_dir: str, captions_csv: str = None):
     """
     Добавляет новые изображения в уже существующий индекс (без пересчёта всего с нуля).
@@ -280,7 +234,6 @@ def add_to_index(images_dir: str, index_dir: str, captions_csv: str = None):
     Режим 1 (без --captions_csv): image_id берётся из имени файла (без расширения).
         Изображение добавляется только в images.index (доступно для image->image
         и text->image поиска, но не появится в результатах image->captions поиска).
-        Это основной режим для сценария "пользователь прислал фото боту".
 
     Режим 2 (с --captions_csv): та же логика, что и в build — image_id и подписи
         берутся из CSV, обновляются оба индекса (images.index и captions.index).
@@ -336,7 +289,6 @@ def add_to_index(images_dir: str, index_dir: str, captions_csv: str = None):
 
     print(f"Добавляю {len(new_paths)} новых изображений...")
     new_embs = compute_image_embeddings(model, processor, new_paths)
-    faiss.normalize_L2(new_embs)
     image_index.add(new_embs)
     faiss.write_index(image_index, str(images_index_path))
 
@@ -361,7 +313,6 @@ def add_to_index(images_dir: str, index_dir: str, captions_csv: str = None):
 
         if captions:
             cap_embs = compute_text_embeddings(model, processor, captions)
-            faiss.normalize_L2(cap_embs)
             if cap_index is None:
                 cap_index = faiss.IndexFlatIP(cap_embs.shape[1])
             cap_index.add(cap_embs)
@@ -389,33 +340,6 @@ def load_index(index_dir: str, kind: str):
     return index, meta
 
 
-TRANSLATE_CACHE_FILE = "translate_cache.json"
-
-
-def translate_ru_to_en(text: str, cache_path: str) -> str:
-    """Переводит запрос RU->EN с кэшированием (см. ограничения по API в ТЗ)."""
-    cache = {}
-    if os.path.exists(cache_path):
-        with open(cache_path, "r", encoding="utf-8") as f:
-            cache = json.load(f)
-    if text in cache:
-        return cache[text]
-
-    try:
-        from deep_translator import GoogleTranslator
-        translated = GoogleTranslator(source="ru", target="en").translate(text)
-        if not translated:
-            raise ValueError("Переводчик вернул пустую строку")
-    except Exception as e:
-        print(f"[перевод не удался, используется исходный текст без кэширования] {e}")
-        return text  # НЕ кэшируем неудачный перевод, чтобы попытаться снова в следующий раз
-
-    cache[text] = translated
-    with open(cache_path, "w", encoding="utf-8") as f:
-        json.dump(cache, f, ensure_ascii=False, indent=2)
-    return translated
-
-
 def search_by_text(index_dir: str, query: str, top_k: int, translate: bool, save_plot: bool = True):
     original_query = query
     if translate:
@@ -425,7 +349,6 @@ def search_by_text(index_dir: str, query: str, top_k: int, translate: bool, save
 
     model, processor = load_model()
     query_emb = compute_text_embeddings(model, processor, [query])
-    faiss.normalize_L2(query_emb)
 
     index, meta = load_index(index_dir, "images")
     scores, indices = index.search(query_emb, top_k)
@@ -433,6 +356,8 @@ def search_by_text(index_dir: str, query: str, top_k: int, translate: bool, save
     print(f"\nТоп-{top_k} изображений по запросу: \"{query}\"")
     found_items, found_scores = [], []
     for rank, (idx, score) in enumerate(zip(indices[0], scores[0]), start=1):
+        if idx < 0:
+            continue  # индекс меньше top_k — FAISS вернул -1 в незаполненных позициях
         item = meta[idx]
         print(f"{rank}. image_id={item['image_id']}  score={score:.4f}  path={item['path']}")
         found_items.append(item)
@@ -445,11 +370,7 @@ def search_by_text(index_dir: str, query: str, top_k: int, translate: bool, save
 
 def search_by_image(index_dir: str, image_path: str, top_k: int, save_plot: bool = True):
     model, processor = load_model()
-    image = Image.open(image_path).convert("RGB")
-    with torch.no_grad():
-        inputs = processor(images=[image], return_tensors="pt").to(DEVICE)
-        query_emb = extract_features_tensor(model.get_image_features(**inputs)).cpu().numpy().astype("float32")
-    faiss.normalize_L2(query_emb)
+    query_emb = compute_image_embeddings(model, processor, [image_path], show_progress=False)
 
     # похожие изображения
     img_index, img_meta = load_index(index_dir, "images")
@@ -457,6 +378,8 @@ def search_by_image(index_dir: str, image_path: str, top_k: int, save_plot: bool
     print(f"\nТоп-{top_k} похожих изображений:")
     found_items, found_scores = [], []
     for rank, (idx, score) in enumerate(zip(indices[0], scores[0]), start=1):
+        if idx < 0:
+            continue
         item = img_meta[idx]
         print(f"{rank}. image_id={item['image_id']}  score={score:.4f}  path={item['path']}")
         found_items.append(item)
@@ -474,6 +397,8 @@ def search_by_image(index_dir: str, image_path: str, top_k: int, save_plot: bool
     scores, indices = cap_index.search(query_emb, top_k)
     print(f"\nТоп-{top_k} релевантных подписей:")
     for rank, (idx, score) in enumerate(zip(indices[0], scores[0]), start=1):
+        if idx < 0:
+            continue
         item = cap_meta[idx]
         print(f"{rank}. image_id={item['image_id']}  score={score:.4f}  caption=\"{item['caption']}\"")
 
@@ -495,8 +420,8 @@ def main():
     p_add.add_argument("--images_dir", required=True, help="папка с новыми изображениями")
     p_add.add_argument("--index_dir", required=True, help="папка с уже существующим индексом (см. build)")
     p_add.add_argument("--captions_csv", default=None,
-                        help="опционально: CSV с image_id,caption_en для новых фото. "
-                             "Если не указан — image_id берётся из имени файла, подписи не индексируются.")
+                       help="опционально: CSV с image_id,caption_en для новых фото. "
+                            "Если не указан — image_id берётся из имени файла, подписи не индексируются.")
 
     p_text = subparsers.add_parser("text", help="поиск изображений по тексту")
     p_text.add_argument("--index_dir", required=True)

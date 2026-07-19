@@ -1,0 +1,23 @@
+# Контекст сборки должен быть маленьким: без этого docker отправит демону
+# датасет COCO (около 800 МБ) и node_modules, и сборка станет заметно медленнее.
+
+.git/
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+data/
+index/
+notebooks/
+
+web-ui/node_modules/
+web-ui/dist/
+web-ui/*.tsbuildinfo
+
+.idea/
+.claude/
+tests/
+*.log
+.env

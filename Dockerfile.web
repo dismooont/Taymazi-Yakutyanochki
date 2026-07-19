@@ -1,0 +1,48 @@
+# Веб-API (FastAPI + резидентный CLIP). Статику отдаёт отдельный контейнер nginx
+# (Dockerfile.ui), сюда приходят только запросы /api.
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Прокси для сборки за "закрытой" сетью (необязательно). На обычном сервере
+# с прямым интернетом оставить пустым.
+ARG HTTP_PROXY=""
+ARG HTTPS_PROXY=""
+ENV HTTP_PROXY=${HTTP_PROXY} HTTPS_PROXY=${HTTPS_PROXY} \
+    http_proxy=${HTTP_PROXY} https_proxy=${HTTPS_PROXY}
+
+# torch CPU-only сборка — образ в разы легче, чем с CUDA-зависимостями.
+#
+# Увеличенные таймаут и число попыток обязательны: колесо torch весит около 200 МБ,
+# и на медленном или нестабильном канале установка по умолчанию обрывается
+# на ReadTimeoutError, роняя всю сборку с самого начала.
+ENV PIP_DEFAULT_TIMEOUT=180 PIP_RETRIES=10
+
+RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
+COPY requirements-web.txt .
+RUN pip install --no-cache-dir -r requirements-web.txt
+
+COPY core/ core/
+COPY web/ web/
+
+# Веса CLIP запекаются в образ: контейнер стартует офлайн и без задержки на
+# скачивание 600 МБ при первом запросе.
+RUN python -c "from transformers import CLIPModel, CLIPProcessor; \
+    CLIPModel.from_pretrained('openai/clip-vit-base-patch32'); \
+    CLIPProcessor.from_pretrained('openai/clip-vit-base-patch32')"
+
+ENV HTTP_PROXY="" HTTPS_PROXY="" http_proxy="" https_proxy="" \
+    PYTHONUNBUFFERED=1 \
+    HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1 \
+    DATA_DIR=/app/data
+
+EXPOSE 8000
+
+# Проверка живости учитывает, что старт занимает секунды: сначала грузится модель.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=90s --retries=3 \
+    CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/health')"
+
+# Строго один воркер: веса CLIP занимают ~600 МБ на процесс, а несколько воркеров
+# писали бы в один FAISS-индекс наперегонки (docs/WEB_PLAN.md, раздел 2).
+CMD ["uvicorn", "web.app:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
