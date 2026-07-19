@@ -28,7 +28,6 @@ import sys
 import time
 from pathlib import Path
 
-import faiss
 import numpy as np
 
 # --- переиспользуем утилиты CLI-скрипта (load_index, normalize_id и пр.) ---
@@ -123,24 +122,23 @@ def measure_latency(index_dir: str, queries: list, images_index, top_k: int = 5)
     model, processor = czss.load_model()
 
     # на одиночных запросах прогресс-бар tqdm только засоряет вывод — глушим его
-    original_tqdm = czss.tqdm
-    czss.tqdm = lambda iterable, **kwargs: iterable
-    try:
-        # первый прогон прогревает ленивую инициализацию torch — в статистику не идёт
-        czss.compute_text_embeddings(model, processor, [queries[0]])
+    # (после рефакторинга под core/ это делается флагом, а не подменой czss.tqdm)
+    encode = lambda text: czss.compute_text_embeddings(  # noqa: E731
+        model, processor, [text], show_progress=False
+    )
 
-        encode_times, search_times = [], []
-        for query in queries:
-            t0 = time.perf_counter()
-            emb = czss.compute_text_embeddings(model, processor, [query])
-            faiss.normalize_L2(emb)
-            t1 = time.perf_counter()
-            images_index.search(emb, top_k)
-            t2 = time.perf_counter()
-            encode_times.append(t1 - t0)
-            search_times.append(t2 - t1)
-    finally:
-        czss.tqdm = original_tqdm
+    # первый прогон прогревает ленивую инициализацию torch — в статистику не идёт
+    encode(queries[0])
+
+    encode_times, search_times = [], []
+    for query in queries:
+        t0 = time.perf_counter()
+        emb = encode(query)  # эмбеддинг уже нормализован (core.model.l2_normalize)
+        t1 = time.perf_counter()
+        images_index.search(emb, top_k)
+        t2 = time.perf_counter()
+        encode_times.append(t1 - t0)
+        search_times.append(t2 - t1)
 
     total = [e + s for e, s in zip(encode_times, search_times)]
     return {
