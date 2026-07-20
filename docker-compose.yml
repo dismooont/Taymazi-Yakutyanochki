@@ -45,7 +45,10 @@ services:
       dockerfile: Dockerfile.ui
     restart: unless-stopped
     depends_on:
-      - web
+      # Иначе страница открывается, пока API ещё грузит модель, и первый же вход
+      # отвечает ошибкой.
+      web:
+        condition: service_healthy
     ports:
       - "${WEB_PORT:-8080}:80"
 
@@ -62,4 +65,9 @@ services:
       # внутреннее имя сервиса: наружу порт API не публикуется
       API_URL: http://web:8000
     depends_on:
-      - web
+      # Именно service_healthy, а не просто «запущен»: web около полуминуты грузит
+      # CLIP и до этого порт не слушает. Бот же начинает разбирать накопившуюся
+      # очередь Telegram сразу, и эти сообщения падали с ConnectError — со стороны
+      # выглядело так, будто бот молча проглотил запрос.
+      web:
+        condition: service_healthy
