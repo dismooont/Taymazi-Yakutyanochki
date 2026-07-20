@@ -204,11 +204,6 @@ def build_dispatcher(api: SearchApi) -> Dispatcher:
             return
         await _answer(message, query)
 
-    @dispatcher.message(F.text, F.chat.type.in_(PRIVATE))
-    async def on_private_text(message: Message) -> None:
-        """В личке любое сообщение — запрос: команда /find тут была бы лишней."""
-        await _answer(message, message.text.strip())
-
     @dispatcher.message(Command("demo"))
     async def on_demo(message: Message, command: CommandObject) -> None:
         """
@@ -237,6 +232,23 @@ def build_dispatcher(api: SearchApi) -> Dispatcher:
             fetch=api.demo_photo_bytes,
             source="демо",
         )
+
+    # Обработчик текста идёт ПОСЛЕ всех команд и сам отсекает начинающееся со слэша.
+    # Иначе он перехватывает команды первым: aiogram отдаёт сообщение первому
+    # подходящему обработчику, а «/demo красный автобус» — это тоже текст, и он
+    # уходил в поиск по базе чата вместо демо-базы.
+    @dispatcher.message(F.text, ~F.text.startswith("/"), F.chat.type.in_(PRIVATE))
+    async def on_private_text(message: Message) -> None:
+        """В личке любое сообщение — запрос: команда /find тут была бы лишней."""
+        await _answer(message, message.text.strip())
+
+    @dispatcher.message(F.text.startswith("/"), F.chat.type.in_(PRIVATE))
+    async def on_unknown_command(message: Message) -> None:
+        """
+        Неизвестная команда должна получить внятный ответ, а не молча уйти в поиск:
+        искать по базе строку «/статистика» бессмысленно.
+        """
+        await message.answer("Не знаю такой команды.\n\n" + HELP)
 
     async def _answer(message: Message, query: str) -> None:
         chat = await api.chat_info(message.chat.id)

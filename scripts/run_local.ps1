@@ -70,6 +70,12 @@ function Test-PortBusy($port) {
     return $null -ne $conn
 }
 
+$npm = (Get-Command npm.cmd -ErrorAction SilentlyContinue).Source
+if (-not $npm -and -not $ApiOnly) {
+    Say "  Не найден npm.cmd — установите Node.js или запускайте с ключом -ApiOnly" "Red"
+    exit 1
+}
+
 if (Test-PortBusy $ApiPort) {
     Say "  Порт $ApiPort занят — освободите его или укажите другой: -ApiPort 8001" "Red"
     exit 1
@@ -89,12 +95,26 @@ Start-Process -FilePath $python `
 if (-not $ApiOnly) {
     if (-not (Test-Path (Join-Path $root "web-ui\node_modules"))) {
         Say "  Ставлю зависимости фронтенда (один раз)..." "Yellow"
-        npm --prefix web-ui install --no-audit --no-fund
+        & $npm --prefix web-ui install --no-audit --no-fund
     }
     Say "  Интерфейс -> http://localhost:$UiPort" "Green"
-    Start-Process -FilePath "npm" `
-        -ArgumentList "--prefix", "web-ui", "run", "dev" `
-        -WorkingDirectory $root
+    # Именно npm.cmd, а не npm: в PATH первым лежит npm.ps1, и Start-Process его
+    # запустить не может — "%1 is not a valid Win32 application". Окно фронтенда
+    # при этом молча не открывалось, а скрипт рапортовал об успехе.
+    Start-Process -FilePath $npm -ArgumentList "--prefix", "web-ui", "run", "dev" -WorkingDirectory $root
+
+    # Ждём, пока Vite действительно начнёт слушать порт: рапортовать об успехе,
+    # когда на localhost никого нет, — худшее, что может делать скрипт запуска.
+    $ready = $false
+    foreach ($attempt in 1..40) {
+        Start-Sleep -Milliseconds 500
+        if (Get-NetTCPConnection -LocalPort $UiPort -State Listen -ErrorAction SilentlyContinue) {
+            $ready = $true
+            break
+        }
+    }
+    if ($ready) { Say "             интерфейс отвечает" "DarkGray" }
+    else { Say "  Фронтенд не поднялся за 20 с — посмотрите его окно" "Red" }
 }
 
 # --- бот --------------------------------------------------------------------
