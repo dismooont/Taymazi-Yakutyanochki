@@ -429,6 +429,43 @@ body {
   min-width: 200px;
 }
 
+/* крупная зона приёма: перетаскивание, выбор файлом, вставка из буфера */
+.droparea {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: 100%;
+  padding: 22px 20px;
+  background: var(--panel);
+  border: 1px dashed var(--rule);
+  border-radius: var(--radius);
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  text-align: center;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+
+.droparea:hover {
+  border-color: #3b4a58;
+  background: var(--panel-hi);
+}
+
+.droparea[data-over='true'] {
+  border-color: var(--signal);
+  background: var(--panel-hi);
+}
+
+.droparea__title {
+  font-family: var(--display);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
 /* компактная зона перетаскивания: кнопка, которая принимает и брошенный файл */
 .drop {
   border-style: dashed;

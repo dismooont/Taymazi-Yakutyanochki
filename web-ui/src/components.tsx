@@ -160,6 +160,111 @@ export function Dropzone({
 }
 
 /* ------------------------------------------------------------------ */
+/* Область для перетаскивания и вставки из буфера                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Крупная зона приёма снимков: перетаскивание, выбор файлом и вставка из буфера.
+ *
+ * Вставка слушается на всём документе, а не только на самой зоне: чтобы поймать
+ * событие на элементе, его пришлось бы сначала сфокусировать, а человек, нажимая
+ * Ctrl+V, ни на что не нажимал — он только что сделал снимок экрана.
+ *
+ * Из буфера берутся только элементы-файлы с типом image/*. Обычный текст сюда
+ * не попадает, поэтому вставка в поле поиска продолжает работать как обычно.
+ */
+export function DropArea({
+  onFiles,
+  disabled,
+  hint,
+}: {
+  onFiles: (files: File[]) => void
+  disabled?: boolean
+  hint?: string
+}) {
+  const [over, setOver] = useState(false)
+  const [flash, setFlash] = useState<string | null>(null)
+  const input = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (disabled) return
+
+    const onPaste = (event: ClipboardEvent) => {
+      const files = Array.from(event.clipboardData?.items ?? [])
+        .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+        .map((item) => item.getAsFile())
+        .filter((file): file is File => file !== null)
+      if (!files.length) return
+
+      event.preventDefault()
+      // у снимка экрана имени нет — подставляем своё, иначе на сервер уйдёт «blob»
+      const named = files.map((file, index) =>
+        file.name && file.name !== 'image.png'
+          ? file
+          : new File([file], `вставка-${Date.now()}-${index + 1}.png`, { type: file.type }),
+      )
+      setFlash(`Вставлено из буфера: ${named.length}`)
+      onFiles(named)
+    }
+
+    document.addEventListener('paste', onPaste)
+    return () => document.removeEventListener('paste', onPaste)
+  }, [onFiles, disabled])
+
+  useEffect(() => {
+    if (!flash) return
+    const timer = setTimeout(() => setFlash(null), 2500)
+    return () => clearTimeout(timer)
+  }, [flash])
+
+  if (disabled) return null
+
+  const take = (list: FileList | null) => {
+    const files = Array.from(list ?? []).filter((file) => file.type.startsWith('image/'))
+    if (files.length) onFiles(files)
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        className="droparea"
+        data-over={over}
+        onClick={() => input.current?.click()}
+        onDragOver={(event) => {
+          event.preventDefault()
+          setOver(true)
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(event) => {
+          event.preventDefault()
+          setOver(false)
+          take(event.dataTransfer.files)
+        }}
+      >
+        <span className="droparea__title">
+          {over ? 'Отпустите — заберу' : 'Перетащите снимки сюда'}
+        </span>
+        <span className="note">
+          {flash ?? hint ?? 'Или нажмите, чтобы выбрать файлы. Скриншот можно вставить: Ctrl+V'}
+        </span>
+      </button>
+      <input
+        ref={input}
+        type="file"
+        accept="image/*"
+        multiple
+        hidden
+        onChange={(event) => {
+          take(event.target.files)
+          event.target.value = '' // тот же файл можно выбрать повторно
+        }}
+      />
+    </>
+  )
+}
+
+/* ------------------------------------------------------------------ */
 /* Сетка снимков                                                       */
 /* ------------------------------------------------------------------ */
 

@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ApiError, api, type Database, type SearchResult } from '../api'
-import { Dropzone, Empty, JobProgress, PhotoGrid, Toast, type Tile, useJob } from '../components'
+import { DropArea, Dropzone, Empty, JobProgress, PhotoGrid, Toast, type Tile, useJob } from '../components'
 import { formatBytes, formatPhotos } from '../format'
 
 type Tab = 'search' | 'gallery'
@@ -168,6 +168,16 @@ export function Workspace() {
           </a>
         </div>
       </header>
+
+      <DropArea
+        onFiles={addPhotos}
+        disabled={database.read_only}
+        hint={
+          database.photos_count === 0
+            ? 'Начните с нескольких снимков: перетащите файлы, нажмите для выбора или вставьте скриншот через Ctrl+V'
+            : undefined
+        }
+      />
 
       {job && <JobProgress job={job} onCancel={() => api.cancelJob(job.id).catch(() => undefined)} />}
 
