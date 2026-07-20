@@ -54,6 +54,7 @@ export interface SearchHit {
   score: number
   thumb_url: string
   file_url: string
+  caption: string
 }
 
 export interface CaptionHit {
@@ -66,6 +67,8 @@ export interface SearchResult {
   used_query: string | null
   results: SearchHit[]
   captions: CaptionHit[]
+  /** Выдача собрана слиянием с поиском по подписям: оценка тогда не косинус. */
+  fused: boolean
 }
 
 export interface Job {

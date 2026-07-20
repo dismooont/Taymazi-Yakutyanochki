@@ -121,6 +121,7 @@ class SearchHitOut(BaseModel):
     score: float
     thumb_url: str
     file_url: str
+    caption: str = ""  # подпись снимка, если она уже сгенерирована
 
 
 class CaptionHitOut(BaseModel):
@@ -139,6 +140,9 @@ class SearchResultOut(BaseModel):
     used_query: str | None = None
     results: list[SearchHitOut] = Field(default_factory=list)
     captions: list[CaptionHitOut] = Field(default_factory=list)
+    # Отработало ли слияние с поиском по подписям. Нужно фронту, чтобы не
+    # показывать оценку слияния как косинус: это разные величины.
+    fused: bool = False
 
 
 class JobOut(BaseModel):

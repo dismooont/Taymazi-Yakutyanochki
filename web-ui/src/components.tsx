@@ -273,17 +273,31 @@ export interface Tile {
   thumbUrl: string
   fileUrl: string
   score?: number
+  caption?: string
 }
 
 export function PhotoGrid({
   tiles,
   onRemove,
+  fused = false,
 }: {
   tiles: Tile[]
   onRemove?: (photoId: string) => void
+  /** Выдача получена слиянием с поиском по подписям — оценка тогда не косинус. */
+  fused?: boolean
 }) {
   const [zoomed, setZoomed] = useState<string | null>(null)
-  const best = tiles.reduce((max, tile) => Math.max(max, tile.score ?? 0), 0)
+
+  // Обычная оценка — косинус, он неотрицателен, и полоску можно мерить от нуля.
+  // Оценка слияния — взвешенная сумма отклонений от среднего, и она свободно
+  // уходит в минус: у половины выдачи она отрицательна по построению. Меряя её
+  // от нуля, мы получили бы отрицательную ширину, то есть пустую полоску у всего
+  // нижнего хвоста.
+  const scores = tiles.map((tile) => tile.score ?? 0)
+  const best = scores.length ? Math.max(...scores) : 0
+  const floor = fused && scores.length ? Math.min(...scores) : 0
+  const span = best - floor
+  const fill = (score: number) => (span > 0 ? ((score - floor) / span) * 100 : 0)
 
   useEffect(() => {
     if (!zoomed) return
@@ -309,21 +323,31 @@ export function PhotoGrid({
             {tile.score !== undefined && (
               <div className="proximity">
                 {/* длина линии — близость относительно первого места в этой выдаче */}
-                <div
-                  className="proximity__fill"
-                  style={{ width: `${best > 0 ? (tile.score / best) * 100 : 0}%` }}
-                />
+                <div className="proximity__fill" style={{ width: `${fill(tile.score)}%` }} />
               </div>
             )}
 
             <figcaption className="card__foot">
               <span className="card__id">{tile.photoId.slice(0, 8)}</span>
               {tile.score !== undefined && (
-                <span className="card__score" title="Косинусная близость к запросу">
+                <span
+                  className="card__score"
+                  title={
+                    fused
+                      ? 'Оценка слияния: поиск по снимку и по подписи вместе'
+                      : 'Косинусная близость к запросу'
+                  }
+                >
                   {formatScore(tile.score)}
                 </span>
               )}
             </figcaption>
+
+            {tile.caption && (
+              <p className="card__caption" title={tile.caption}>
+                {tile.caption}
+              </p>
+            )}
 
             {onRemove && (
               <button

@@ -140,6 +140,7 @@ export function Workspace() {
       thumbUrl: hit.thumb_url,
       fileUrl: hit.file_url,
       score: hit.score,
+      caption: hit.caption,
     })) ?? []
 
   return (
@@ -254,6 +255,7 @@ export function Workspace() {
             <PhotoGrid
               tiles={searchTiles}
               onRemove={database.read_only ? undefined : removePhoto}
+              fused={result?.fused ?? false}
             />
           )}
 

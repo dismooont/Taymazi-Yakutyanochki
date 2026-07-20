@@ -570,6 +570,21 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
+/* Подпись снимка: две строки максимум — иначе карточки в сетке разъедутся по
+   высоте, а длинные подписи вытеснят сами снимки. */
+.card__caption {
+  margin: 0;
+  padding: 0 10px 10px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--muted);
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 .card__remove {
   position: absolute;
   top: 8px;

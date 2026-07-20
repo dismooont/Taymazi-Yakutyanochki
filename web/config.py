@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
+from core.captions import DEFAULT_CAPTION_MODEL
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # В Docker переменные приходят через env_file, а при локальном запуске их неоткуда
@@ -54,6 +56,8 @@ class Settings:
     telegram_bot_username: str
     telegram_proxy: str
     service_token: str
+    caption_search_enabled: bool
+    caption_model: str
 
     @property
     def db_path(self) -> Path:
@@ -124,6 +128,11 @@ def get_settings() -> Settings:
         # Токен, которым Telegram-бот доказывает API, что он свой. Пока не задан,
         # ручки /api/bot не существует вовсе — так безопаснее умолчания.
         service_token=os.environ.get("SERVICE_TOKEN", "").strip(),
+        # Поиск по подписям выключен по умолчанию: он тянет вторую модель (~90 МБ
+        # весов) и имеет смысл только тогда, когда подписи уже сгенерированы.
+        # Замер пользы — docs/CAPTION_SEARCH_C0.md.
+        caption_search_enabled=_flag("CAPTION_SEARCH_ENABLED", False),
+        caption_model=os.environ.get("CAPTION_MODEL", DEFAULT_CAPTION_MODEL).strip(),
     )
 
 

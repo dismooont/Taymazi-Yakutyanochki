@@ -42,7 +42,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator, Sequence
+from typing import Callable, Iterator, Sequence
 
 import faiss
 import numpy as np
@@ -67,6 +67,20 @@ META_VERSION = 3
 # миграции и без перестроения индекса.
 SUPPORTED_META_VERSIONS = (2, 3)
 CAPTIONS_SBERT_VERSION = 1
+# Вес пути CLIP при слиянии. Подобран в фазе C0 на отложенной половине запросов
+# при одной подписи на снимок — см. docs/CAPTION_SEARCH_C0.md.
+CAPTION_FUSION_ALPHA = 0.6
+# Ниже этого покрытия слияние не включается.
+#
+# Оценки подписей приводятся к нулевому среднему по подписанным снимкам, и при
+# малом покрытии это фабрикует сигнал из ничего: лучшая из трёх подписей получает
+# высокую оценку просто потому, что она лучшая из трёх, а не потому, что отвечает
+# запросу. Такой снимок вылезает наверх, вытесняя честные находки CLIP.
+#
+# Пока база размечена меньше чем наполовину, поиск остаётся обычным. Это заметно
+# лучше, чем портить выдачу на всё время разметки.
+CAPTION_FUSION_MIN_COVERAGE = 0.5
+CAPTION_FUSION_MIN_PHOTOS = 10
 ALLOWED_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
 THUMB_SIZE = 320
 # Индекс сбрасывается на диск не после каждого батча: write_index на 5000 векторов — это
@@ -74,6 +88,10 @@ THUMB_SIZE = 320
 FLUSH_EVERY = 500
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# Запрос -> вектор в пространстве подписей. Именно функция, а не модель: ядру
+# незачем знать, чем считается текстовый эмбеддинг.
+CaptionEncoderLike = Callable[[str], np.ndarray]
 
 
 # --------------------------------------------------------------------------
@@ -112,6 +130,7 @@ class SearchHit:
     score: float
     filename: str
     path: str
+    caption: str = ""  # чтобы показать человеку, почему снимок нашёлся
 
 
 @dataclass
@@ -176,6 +195,11 @@ def _file_photo_id(path: Path) -> str:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
     return h.hexdigest()[:16]
+
+
+def _zscore(values: np.ndarray) -> np.ndarray:
+    """Нулевое среднее, единичный разброс. Константный вектор даёт нули, а не NaN."""
+    return (values - values.mean()) / (values.std() + 1e-9)
 
 
 def normalize_id(value) -> str:
@@ -765,12 +789,103 @@ class IndexStore:
         top_k: int = 5,
         translate: bool = True,
         holder: ModelHolder | None = None,
+        caption_encoder: "CaptionEncoderLike | None" = None,
+        alpha: float = CAPTION_FUSION_ALPHA,
     ) -> tuple[str, list[SearchHit]]:
-        """Возвращает (использованный запрос, результаты). Пустая база -> пустой список."""
+        """
+        Возвращает (использованный запрос, результаты). Пустая база -> пустой список.
+
+        caption_encoder — то, чем кодировать запрос для поиска по подписям. Передаётся
+        функцией, а не моделью: ядро не должно зависеть от конкретного текстового
+        энкодера. Если его нет или в базе нет ни одной подписи, работает обычный CLIP.
+
+        Кодируется именно used_query, то есть уже переведённый текст: подписи
+        генерируются на английском, и слать в текстовую модель русский оригинал
+        значило бы сравнивать разные языки.
+        """
         holder = holder or ModelHolder.get()
         used_query = maybe_translate(query, self.root / TRANSLATE_CACHE_FILE, translate)
         emb = holder.encode_texts([used_query])
+
+        if caption_encoder is not None and self.fusion_ready():
+            return used_query, self._search_fused(emb, caption_encoder(used_query),
+                                                  top_k, alpha)
         return used_query, self._search(self._index, emb, top_k, self._hit_from_photo)
+
+    def fusion_ready(self) -> bool:
+        """
+        Хватает ли подписей, чтобы слияние помогало, а не мешало. Пороги и причина —
+        рядом с CAPTION_FUSION_MIN_COVERAGE.
+        """
+        if self._load_caption_vectors() is None or not self._photos:
+            return False
+        covered = self._sbert_index.ntotal
+        return (
+            covered >= CAPTION_FUSION_MIN_PHOTOS
+            and covered / len(self._photos) >= CAPTION_FUSION_MIN_COVERAGE
+        )
+
+    def _search_fused(
+        self, emb: np.ndarray, caption_vector: np.ndarray, top_k: int, alpha: float
+    ) -> list[SearchHit]:
+        """
+        Слияние двух путей поиска — ровно то, что мерилось в C0.
+
+        Там оценки приводились к нулевому среднему и единичному разбросу по ВСЕМ
+        кандидатам, и повторить это надо в точности: у CLIP косинусы плотно сидят
+        около 0.2-0.3, у текстовой модели разброс шире, и сложение сырых оценок
+        отдало бы вес просто тому, у кого шкала растянутее. Поэтому берём у FAISS
+        полную выдачу, а не top_k: нормировать по верхушке списка нельзя, среднее
+        и разброс по ней — не те же самые числа.
+
+        Снимок без подписи получает по второму пути ноль, то есть ровно среднее.
+        Это нейтральная подстановка: отсутствие подписи не повышает и не понижает
+        снимок, а оставляет его на том месте, куда его поставил CLIP. Штрафовать
+        такие снимки было бы неверно — база размечается постепенно, и в середине
+        разметки половина фотографий просто ещё не дошла до очереди.
+        """
+        with self._lock:
+            total = self._index.ntotal
+            if total == 0 or top_k <= 0:
+                return []
+
+            clip_scores = self._full_scores(self._index, emb, total)
+
+            caption_z = np.zeros(total, dtype="float32")
+            vector = np.ascontiguousarray(
+                np.asarray(caption_vector, dtype="float32").reshape(1, -1)
+            )
+            if vector.shape[1] != self._sbert_index.d:
+                raise StoreError(
+                    f"Размерность запроса {vector.shape[1]} не совпадает с индексом "
+                    f"подписей {self._sbert_index.d} — модель сменилась?"
+                )
+            raw = self._full_scores(self._sbert_index, vector, self._sbert_index.ntotal)
+            raw_z = _zscore(raw)
+            for row, photo_id in enumerate(self._sbert_rows):
+                position = self._by_id.get(photo_id)
+                if position is not None:
+                    caption_z[position] = raw_z[row]
+
+            fused = alpha * _zscore(clip_scores) + (1 - alpha) * caption_z
+            best = np.argsort(-fused)[:top_k]
+            return [self._hit_from_photo(int(row), float(fused[row])) for row in best]
+
+    @staticmethod
+    def _full_scores(index, emb: np.ndarray, total: int) -> np.ndarray:
+        """
+        Оценки по всем векторам индекса в порядке строк. FAISS всё равно сканирует
+        индекс целиком, поэтому полная выдача вместо top_k стоит почти столько же:
+        на индексе COCO (5022 вектора, dim 512) замерено 1,30 мс против 0,84 мс.
+
+        На фоне запроса это ничто — время уходит в энкодеры, а не в поиск. Дороже
+        обходится сам второй путь: подпись запроса надо закодировать текстовой
+        моделью, и это единственная заметная добавка слияния.
+        """
+        scores, rows = index.search(emb, total)
+        full = np.zeros(total, dtype="float32")
+        full[rows[0]] = scores[0]
+        return full
 
     def search_similar(self, photo_id: str, top_k: int = 5) -> list[SearchHit]:
         """
@@ -842,6 +957,7 @@ class IndexStore:
             score=score,
             filename=photo.filename,
             path=str(self.photo_path(photo)),
+            caption=photo.caption,
         )
 
     # ------------------------------------------------------------------

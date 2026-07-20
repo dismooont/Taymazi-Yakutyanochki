@@ -17,7 +17,7 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 from web.deps import CurrentUser, OwnedDatabase
 from web.schemas import CaptionHitOut, SearchHitOut, SearchResultOut, SearchTextRequest
 from web.security import RateLimiter
-from web.stores import store_for
+from web.stores import caption_encoder_for, store_for
 
 router = APIRouter(prefix="/api/databases/{database_id}/search", tags=["search"])
 
@@ -40,6 +40,7 @@ def _hits(database: dict, hits) -> list[SearchHitOut]:
             score=round(hit.score, 4),
             thumb_url=f"{base}/{hit.photo_id}/thumb",
             file_url=f"{base}/{hit.photo_id}/file",
+            caption=hit.caption,
         )
         for hit in hits
     ]
@@ -51,10 +52,21 @@ def search_by_text(
 ) -> SearchResultOut:
     _check_rate(user["id"])
     store = store_for(database)
+    encoder = caption_encoder_for(store)
     used_query, hits = store.search_text(
-        payload.query.strip(), top_k=payload.top_k, translate=payload.translate
+        payload.query.strip(),
+        top_k=payload.top_k,
+        translate=payload.translate,
+        caption_encoder=encoder,
     )
-    return SearchResultOut(used_query=used_query, results=_hits(database, hits))
+    return SearchResultOut(
+        used_query=used_query,
+        results=_hits(database, hits),
+        # Оценки слияния и обычного поиска — разные величины: у первого это
+        # взвешенная сумма нормированных отклонений, у второго косинус. Показывать
+        # их одинаково значило бы вводить человека в заблуждение.
+        fused=encoder is not None,
+    )
 
 
 @router.post("/image", response_model=SearchResultOut)

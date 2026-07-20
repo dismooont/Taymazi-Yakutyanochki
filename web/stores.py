@@ -18,6 +18,7 @@ import time
 from collections import OrderedDict
 from pathlib import Path
 
+from core.captions import CaptionEncoder, caption_encoder_available
 from core.store import IndexStore
 from web import db
 from web.config import get_settings
@@ -40,6 +41,28 @@ def database_root(user_id: str, database_id: str, kind: str = "personal") -> Pat
 def store_for(database: dict) -> IndexStore:
     """Удобная обёртка: открыть базу по её строке из БД."""
     return store_cache.get(database["user_id"], database["id"], database.get("kind", "personal"))
+
+
+def caption_encoder_for(store: IndexStore):
+    """
+    Энкодер запроса для поиска по подписям — или None, если он не нужен.
+
+    Возвращается None в трёх случаях: поиск по подписям выключен настройкой, в
+    базе слишком мало подписей (см. fusion_ready), или sentence-transformers не
+    установлен. Последнее важно отдельно: библиотека лежит только в
+    requirements-dev, и в обычной сборке её нет. Падать из-за этого поиск не
+    должен — он просто остаётся обычным.
+
+    Модель грузится лениво и только здесь, то есть при первом поиске по базе с
+    подписями, а не при старте приложения.
+    """
+    settings = get_settings()
+    if not settings.caption_search_enabled or not store.fusion_ready():
+        return None
+    if not caption_encoder_available():
+        print("[поиск по подписям выключен] нет sentence-transformers")
+        return None
+    return CaptionEncoder.get(settings.caption_model).encode_one
 
 
 class StoreCache:
