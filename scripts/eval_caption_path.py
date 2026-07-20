@@ -160,6 +160,9 @@ def main():
     parser.add_argument("--batch", type=int, default=256)
     parser.add_argument("--docs_per_image", type=int, default=None,
                         help="сколько подписей на снимок класть в индекс; 1 = как у BLIP")
+    parser.add_argument("--pool_from", default=None,
+                        help="JSON, чьи image_id задают пул снимков; нужен, чтобы прогон "
+                             "на человеческих подписях шёл по тому же пулу, что и на машинных")
     parser.add_argument("--blip_captions", default=None,
                         help="JSON {image_id: подпись} от scripts/generate_captions.py — "
                              "заменяет человеческие подписи машинными (фаза C3)")
@@ -173,6 +176,14 @@ def main():
     images_index, images_meta = load_index(index_dir, "images")
     captions_index, captions_meta = load_index(index_dir, "captions")
     print(f"Индекс: {images_index.ntotal} снимков, {captions_index.ntotal} подписей")
+
+    if args.pool_from:
+        # Сравнивать машинные подписи с человеческими можно только на одном и том
+        # же пуле: чем меньше снимков-кандидатов, тем выше Recall у любой системы,
+        # и разные пулы дали бы разницу там, где её нет.
+        keep = set(json.loads(Path(args.pool_from).read_text(encoding="utf-8")))
+        captions_meta = [item for item in captions_meta if str(item["image_id"]) in keep]
+        print(f"Пул ограничен файлом {args.pool_from}: {len(keep)} снимков")
 
     if args.blip_captions:
         blip = json.loads(Path(args.blip_captions).read_text(encoding="utf-8"))

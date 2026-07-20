@@ -21,10 +21,15 @@ DEFAULT_BLIP_MODEL = "Salesforce/blip-image-captioning-base"
 # офлайн: huggingface_hub на большом файле здесь молча стоит на нуле, а обычная
 # докачка curl идёт — так что локальная папка оказывается ещё и надёжнее.
 LOCAL_BLIP_DIR = Path(__file__).resolve().parent.parent / "models" / "blip"
-# Подпись к фотографии — это одно короткое предложение. Ограничение стоит не ради
-# скорости: без него BLIP на однообразных снимках уходит в повтор одной и той же
-# фразы, и такая подпись только засоряет индекс.
+# Подпись к фотографии — это одно короткое предложение.
 MAX_NEW_TOKENS = 24
+# Жадная генерация на однообразных снимках срывается в повтор: офисный кубикл дал
+# «a cubic cubic cubic cubic ...» на все двадцать четыре токена. Ограничение длины
+# от этого не спасает, оно лишь обрезает повтор — нужен запрет на повторение пар
+# слов. Такая подпись не просто бесполезна: она попадает в индекс и притягивает к
+# себе запросы со словом из повтора.
+NO_REPEAT_NGRAM = 2
+REPETITION_PENALTY = 1.2
 
 
 class Captioner:
@@ -105,7 +110,12 @@ class Captioner:
             if images:
                 with self._lock, torch.inference_mode():
                     inputs = processor(images=images, return_tensors="pt")
-                    output = model.generate(**inputs, max_new_tokens=MAX_NEW_TOKENS)
+                    output = model.generate(
+                        **inputs,
+                        max_new_tokens=MAX_NEW_TOKENS,
+                        no_repeat_ngram_size=NO_REPEAT_NGRAM,
+                        repetition_penalty=REPETITION_PENALTY,
+                    )
                     decoded = processor.batch_decode(output, skip_special_tokens=True)
                 for offset, text in zip(positions, decoded):
                     produced[offset] = text.strip()

@@ -130,7 +130,7 @@ def get_settings() -> Settings:
         service_token=os.environ.get("SERVICE_TOKEN", "").strip(),
         # Поиск по подписям выключен по умолчанию: он тянет вторую модель (~90 МБ
         # весов) и имеет смысл только тогда, когда подписи уже сгенерированы.
-        # Замер пользы — docs/CAPTION_SEARCH_C0.md.
+        # Замер пользы — docs/CAPTION_SEARCH.md.
         caption_search_enabled=_flag("CAPTION_SEARCH_ENABLED", False),
         caption_model=os.environ.get("CAPTION_MODEL", DEFAULT_CAPTION_MODEL).strip(),
     )
