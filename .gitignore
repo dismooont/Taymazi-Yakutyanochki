@@ -13,6 +13,10 @@ data/app.db
 data/app.db-wal
 data/app.db-shm
 
+# Веса моделей, скачанные локально (BLIP — почти гигабайт)
+models/
+.blip-download.log
+
 # Секреты (Telegram-бот)
 .env
 

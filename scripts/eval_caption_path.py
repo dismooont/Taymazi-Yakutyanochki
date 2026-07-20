@@ -25,6 +25,7 @@
 """
 
 import argparse
+import hashlib
 import json
 import re
 import sys
@@ -62,6 +63,31 @@ def reconstruct_all(index) -> np.ndarray:
         return index.reconstruct_n(0, index.ntotal)
     except RuntimeError:
         return np.vstack([index.reconstruct(i) for i in range(index.ntotal)])
+
+
+def build_split_blip(captions_meta: list, blip: dict[str, str]) -> tuple[list, list]:
+    """
+    Запросы — человеческие подписи, документы — машинные (фаза C3).
+
+    Запрос остаётся человеческим намеренно: он изображает то, что напишет человек
+    в строке поиска. Меняется только то, что лежит в индексе, — ровно этим и
+    отличается реальная система от замера C0.
+
+    Снимки без машинной подписи выбрасываются целиком, чтобы обе системы искали
+    в одном и том же пуле.
+    """
+    by_image = defaultdict(list)
+    for row, item in enumerate(captions_meta):
+        by_image[str(item["image_id"])].append((row, item["caption"]))
+
+    queries, documents = [], []
+    for image_id, items in by_image.items():
+        text = blip.get(image_id, "").strip()
+        if not text:
+            continue
+        queries.append({"image_id": image_id, "row": items[0][0], "text": items[0][1]})
+        documents.append({"image_id": image_id, "row": -1, "text": text})
+    return queries, documents
 
 
 def build_split(captions_meta: list, docs_per_image: int | None = None) -> tuple[list, list]:
@@ -134,6 +160,9 @@ def main():
     parser.add_argument("--batch", type=int, default=256)
     parser.add_argument("--docs_per_image", type=int, default=None,
                         help="сколько подписей на снимок класть в индекс; 1 = как у BLIP")
+    parser.add_argument("--blip_captions", default=None,
+                        help="JSON {image_id: подпись} от scripts/generate_captions.py — "
+                             "заменяет человеческие подписи машинными (фаза C3)")
     parser.add_argument("--output", default=None)
     parser.add_argument("--cache", default=None, help="куда класть эмбеддинги SBERT")
     args = parser.parse_args()
@@ -145,12 +174,16 @@ def main():
     captions_index, captions_meta = load_index(index_dir, "captions")
     print(f"Индекс: {images_index.ntotal} снимков, {captions_index.ntotal} подписей")
 
-    queries, documents = build_split(captions_meta, args.docs_per_image)
+    if args.blip_captions:
+        blip = json.loads(Path(args.blip_captions).read_text(encoding="utf-8"))
+        queries, documents = build_split_blip(captions_meta, blip)
+        source = f"машинные ({len(blip)} шт. в файле)"
+    else:
+        queries, documents = build_split(captions_meta, args.docs_per_image)
+        source = f"человеческие, на снимок: {args.docs_per_image or 'все'}"
     if args.limit:
         queries = queries[: args.limit]
-    per_image = args.docs_per_image or "все"
-    print(f"Запросов: {len(queries)}, документов-подписей: {len(documents)} "
-          f"(на снимок: {per_image})")
+    print(f"Запросов: {len(queries)}, документов-подписей: {len(documents)} [{source}]")
 
     # Пул кандидатов — только снимки, у которых есть хотя бы одна подпись-документ.
     # Обе системы ищут в одном и том же множестве, иначе сравнивать нечего.
@@ -188,10 +221,14 @@ def main():
     # запросы с подписями от другого прогона.
     cache = Path(args.cache) if args.cache else None
     doc_texts = [d["text"] for d in documents]
-    doc_rows = np.array([d["row"] for d in documents])
+    # Ключ кэша — отпечаток самих текстов, а не их номеров: в режиме C3 документы
+    # берутся не из captions_meta и номеров строк у них нет вовсе.
+    digest = np.frombuffer(
+        hashlib.sha1("\n".join(doc_texts).encode("utf-8")).digest(), dtype=np.uint8
+    )
     if cache and cache.exists():
         stored = np.load(cache)
-        if np.array_equal(stored["rows"], doc_rows):
+        if np.array_equal(stored["rows"], digest):
             doc_sbert = stored["vectors"]
             print(f"  эмбеддинги документов взяты из кэша: {cache}")
         else:
@@ -209,7 +246,7 @@ def main():
         print(f"  {len(doc_texts)} подписей закодировано за {time.perf_counter() - t0:.0f} с")
         if cache:
             cache.parent.mkdir(parents=True, exist_ok=True)
-            np.savez(cache, vectors=doc_sbert, rows=doc_rows)
+            np.savez(cache, vectors=doc_sbert, rows=digest)
 
     query_sbert = model.encode(
         [q["text"] for q in queries], batch_size=args.batch,
