@@ -89,5 +89,30 @@ class SearchApi:
             json={"query": query, "top_k": top_k, "translate": True},
         )
 
+    async def similar(self, chat_id: int, photo_id: str, top_k: int = 5) -> dict:
+        return await self._request(
+            "GET", f"/api/bot/chats/{chat_id}/photos/{photo_id}/similar",
+            params={"top_k": top_k},
+        )
+
     async def photo_bytes(self, chat_id: int, photo_id: str) -> bytes:
         return await self._request("GET", f"/api/bot/chats/{chat_id}/photos/{photo_id}/file")
+
+    # --- общая демо-база MS COCO (только чтение, доступна из любого чата) ---
+
+    async def demo_info(self) -> dict | None:
+        try:
+            return await self._request("GET", "/api/bot/demo")
+        except ApiError as e:
+            if e.status_code == 404:
+                return None
+            raise
+
+    async def search_demo(self, query: str, top_k: int = 5) -> dict:
+        return await self._request(
+            "POST", "/api/bot/demo/search",
+            json={"query": query, "top_k": top_k, "translate": True},
+        )
+
+    async def demo_photo_bytes(self, photo_id: str) -> bytes:
+        return await self._request("GET", f"/api/bot/demo/photos/{photo_id}/file")

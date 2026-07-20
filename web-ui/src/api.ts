@@ -27,6 +27,8 @@ export interface Database {
   index_bytes: number
   total_bytes: number
   has_captions: boolean
+  /** сколько снимков уже размечено подписями — фоновая разметка идёт постепенно */
+  captions_count: number
   status: string
   /** personal — своя база, chat — база Telegram-чата, demo — общая витрина */
   kind: 'personal' | 'chat' | 'demo'
@@ -54,6 +56,7 @@ export interface SearchHit {
   score: number
   thumb_url: string
   file_url: string
+  caption: string
 }
 
 export interface CaptionHit {
@@ -66,6 +69,8 @@ export interface SearchResult {
   used_query: string | null
   results: SearchHit[]
   captions: CaptionHit[]
+  /** Выдача собрана слиянием с поиском по подписям: оценка тогда не косинус. */
+  fused: boolean
 }
 
 export interface Job {

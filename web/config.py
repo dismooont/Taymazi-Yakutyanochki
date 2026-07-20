@@ -10,6 +10,8 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
+from core.captions import DEFAULT_CAPTION_MODEL
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # В Docker переменные приходят через env_file, а при локальном запуске их неоткуда
@@ -54,6 +56,13 @@ class Settings:
     telegram_bot_username: str
     telegram_proxy: str
     service_token: str
+    caption_search_enabled: bool
+    caption_model: str
+    caption_auto_enabled: bool
+    caption_idle_seconds: float
+    caption_force_after: float
+    caption_threads: int | None
+    caption_blip_model: str
 
     @property
     def db_path(self) -> Path:
@@ -124,6 +133,26 @@ def get_settings() -> Settings:
         # Токен, которым Telegram-бот доказывает API, что он свой. Пока не задан,
         # ручки /api/bot не существует вовсе — так безопаснее умолчания.
         service_token=os.environ.get("SERVICE_TOKEN", "").strip(),
+        # Поиск по подписям выключен по умолчанию: он тянет вторую модель (~90 МБ
+        # весов) и имеет смысл только тогда, когда подписи уже сгенерированы.
+        # Замер пользы — docs/CAPTION_SEARCH.md.
+        caption_search_enabled=_flag("CAPTION_SEARCH_ENABLED", False),
+        caption_model=os.environ.get("CAPTION_MODEL", DEFAULT_CAPTION_MODEL).strip(),
+        # Фоновая генерация подписей (C4). Отдельный флаг от caption_search: искать
+        # можно и по подписям, сгенерированным заранее командой, не запуская BLIP
+        # в вебе вовсе.
+        caption_auto_enabled=_flag("CAPTION_AUTO_ENABLED", False),
+        # Порог простоя: столько секунд без запросов, чтобы начать размечать.
+        caption_idle_seconds=float(_int("CAPTION_IDLE_SECONDS", 30)),
+        # Раз в столько секунд размечаем даже под нагрузкой — иначе активный
+        # пользователь не даст разметить свою базу никогда.
+        caption_force_after=float(_int("CAPTION_FORCE_AFTER", 600)),
+        # Сколько ядер отдать BLIP. None — не ограничивать. Меньшее число замедляет
+        # разметку, зато оставляет поиску воздух.
+        caption_threads=(_int("CAPTION_THREADS", 0) or None),
+        caption_blip_model=os.environ.get(
+            "CAPTION_BLIP_MODEL", "Salesforce/blip-image-captioning-base"
+        ).strip(),
     )
 
 

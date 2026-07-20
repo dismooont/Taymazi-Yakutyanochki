@@ -47,9 +47,15 @@ def translate_ru_to_en(text: str, cache_path: str | Path) -> str:
         return text
 
     cache[text] = translated
-    Path(cache_path).parent.mkdir(parents=True, exist_ok=True)
-    with open(cache_path, "w", encoding="utf-8") as f:
-        json.dump(cache, f, ensure_ascii=False, indent=2)
+    try:
+        Path(cache_path).parent.mkdir(parents=True, exist_ok=True)
+        with open(cache_path, "w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False, indent=2)
+    except OSError as e:
+        # Кэш — это ускорение, а не условие работы. Демо-база, например,
+        # примонтирована только для чтения, и попытка записи туда роняла бы
+        # каждый русский запрос к ней. Перевод уже получен — возвращаем его.
+        print(f"[кэш переводов недоступен, работаем без него] {e}")
     return translated
 
 

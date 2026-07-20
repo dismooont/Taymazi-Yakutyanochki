@@ -6,7 +6,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import { ApiError, api, type Database, type SearchResult } from '../api'
-import { Dropzone, Empty, JobProgress, PhotoGrid, Toast, type Tile, useJob } from '../components'
+import { DropArea, Dropzone, Empty, JobProgress, PhotoGrid, Toast, type Tile, useJob } from '../components'
 import { formatBytes, formatPhotos } from '../format'
 
 type Tab = 'search' | 'gallery'
@@ -140,6 +140,7 @@ export function Workspace() {
       thumbUrl: hit.thumb_url,
       fileUrl: hit.file_url,
       score: hit.score,
+      caption: hit.caption,
     })) ?? []
 
   return (
@@ -154,6 +155,9 @@ export function Workspace() {
           </h1>
           <p className="mono" style={{ color: 'var(--muted)', margin: '6px 0 0' }}>
             {formatPhotos(database.photos_count)} · {formatBytes(database.total_bytes)}
+            {database.captions_count > 0 && database.captions_count < database.photos_count && (
+              <> · размечено {database.captions_count} из {database.photos_count}</>
+            )}
           </p>
         </div>
 
@@ -168,6 +172,16 @@ export function Workspace() {
           </a>
         </div>
       </header>
+
+      <DropArea
+        onFiles={addPhotos}
+        disabled={database.read_only}
+        hint={
+          database.photos_count === 0
+            ? 'Начните с нескольких снимков: перетащите файлы, нажмите для выбора или вставьте скриншот через Ctrl+V'
+            : undefined
+        }
+      />
 
       {job && <JobProgress job={job} onCancel={() => api.cancelJob(job.id).catch(() => undefined)} />}
 
@@ -244,6 +258,7 @@ export function Workspace() {
             <PhotoGrid
               tiles={searchTiles}
               onRemove={database.read_only ? undefined : removePhoto}
+              fused={result?.fused ?? false}
             />
           )}
 

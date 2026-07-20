@@ -5,3 +5,7 @@
 -r requirements.txt
 
 pytest>=8.0
+
+# Только для scripts/eval_caption_path.py — замер пользы поиска через подписи.
+# В requirements.txt намеренно не вынесено: ни веб, ни бот SBERT не используют.
+sentence-transformers>=3.0

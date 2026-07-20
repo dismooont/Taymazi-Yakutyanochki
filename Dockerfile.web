@@ -23,14 +23,19 @@ RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/wh
 COPY requirements-web.txt .
 RUN pip install --no-cache-dir -r requirements-web.txt
 
-COPY core/ core/
-COPY web/ web/
-
 # Веса CLIP запекаются в образ: контейнер стартует офлайн и без задержки на
 # скачивание 600 МБ при первом запросе.
+#
+# Этот шаг идёт ДО копирования исходников намеренно. Он зависит только от
+# transformers, а не от нашего кода, поэтому остаётся в кэше при любой правке
+# в core/ и web/. Если поставить его после COPY, каждая правка одной строки
+# заново качала бы 600 МБ весов и превращала пересборку в многоминутную.
 RUN python -c "from transformers import CLIPModel, CLIPProcessor; \
     CLIPModel.from_pretrained('openai/clip-vit-base-patch32'); \
     CLIPProcessor.from_pretrained('openai/clip-vit-base-patch32')"
+
+COPY core/ core/
+COPY web/ web/
 
 ENV HTTP_PROXY="" HTTPS_PROXY="" http_proxy="" https_proxy="" \
     PYTHONUNBUFFERED=1 \

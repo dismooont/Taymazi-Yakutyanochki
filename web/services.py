@@ -87,7 +87,12 @@ def index_files(store: IndexStore, files: list[Path], context: JobContext | None
     """
     result = store.add_photos(files, on_progress=(context.progress if context else None))
     skipped = [((names or {}).get(name, name), reason) for name, reason in result.skipped]
-    return {"added": result.added_count, "skipped": skipped}
+    return {
+        "added": result.added_count,
+        "skipped": skipped,
+        # id первого добавленного нужен боту, чтобы сразу показать похожие
+        "photo_id": result.added[0].photo_id if result.added else None,
+    }
 
 
 def add_photo_paths(database: dict, files: list[Path], staging: Path,
@@ -100,7 +105,7 @@ def add_photo_paths(database: dict, files: list[Path], staging: Path,
     """
     if not files:
         shutil.rmtree(staging, ignore_errors=True)
-        return {"job_id": None, "added": 0, "skipped": []}
+        return {"job_id": None, "added": 0, "skipped": [], "photo_id": None}
 
     if len(files) <= SYNC_UPLOAD_LIMIT:
         try:
@@ -127,7 +132,7 @@ def add_photo_paths(database: dict, files: list[Path], staging: Path,
         function=task,
         total=len(files),
     )
-    return {"job_id": job["id"], "added": 0, "skipped": []}
+    return {"job_id": job["id"], "added": 0, "skipped": [], "photo_id": None}
 
 
 # --------------------------------------------------------------------------

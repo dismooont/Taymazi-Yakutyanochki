@@ -9,9 +9,11 @@ IndexStore — одна база фотографий: FAISS-индекс + фа
 Раскладка папки базы:
     <root>/
         images.index          FAISS IndexFlatIP по эмбеддингам картинок
-        images_meta.json      {"version": 2, "photos": [...]} — порядок = порядок векторов
-        captions.index        опционально: эмбеддинги подписей (есть только у COCO-базы)
+        images_meta.json      {"version": 3, "photos": [...]} — порядок = порядок векторов
+        captions.index        опционально: подписи в пространстве CLIP (есть у COCO-базы)
         captions_meta.json
+        captions_sbert.index  опционально: те же подписи в пространстве текстовой модели
+        captions_sbert.json   {"version": 1, "model": "...", "rows": [photo_id, ...]}
         translate_cache.json
         photos/               оригиналы, имя файла = <photo_id><ext>
         thumbs/               превью 320px WebP
@@ -19,6 +21,15 @@ IndexStore — одна база фотографий: FAISS-индекс + фа
 Инвариант, на котором держится всё остальное: i-я запись в images_meta.json описывает
 i-й вектор в images.index. Любая операция, меняющая одно, обязана менять и второе — под
 локом и с атомарной записью на диск.
+
+Для captions_sbert.index этот инвариант намеренно НЕ действует. Подписи появляются
+позже фотографий и покрывают базу частично: пока генератор не дошёл до снимка,
+подписи у него нет. Позиционное соответствие здесь развалилось бы на первом же
+удалении снимка без подписи, поэтому строки индекса подписей адресуются не номером,
+а собственным списком photo_id в captions_sbert.json.
+
+Индекс подписей вторичен: если он повреждён или отстал от базы, поиск по подписям
+выключается, но сама база продолжает открываться и работать.
 """
 
 from __future__ import annotations
@@ -31,7 +42,7 @@ import threading
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Iterator, Sequence
+from typing import Callable, Iterator, Sequence
 
 import faiss
 import numpy as np
@@ -45,10 +56,35 @@ IMAGES_INDEX = "images.index"
 IMAGES_META = "images_meta.json"
 CAPTIONS_INDEX = "captions.index"
 CAPTIONS_META = "captions_meta.json"
+CAPTIONS_SBERT_INDEX = "captions_sbert.index"
+CAPTIONS_SBERT_META = "captions_sbert.json"
 PHOTOS_DIR = "photos"
 THUMBS_DIR = "thumbs"
 
-META_VERSION = 2
+META_VERSION = 3
+# v2 отличается от v3 только отсутствием подписи у снимка, а недостающие поля
+# закрыты значениями по умолчанию — поэтому старые базы читаются как есть, без
+# миграции и без перестроения индекса.
+SUPPORTED_META_VERSIONS = (2, 3)
+CAPTIONS_SBERT_VERSION = 1
+# Вес пути CLIP при слиянии — см. docs/CAPTION_SEARCH.md.
+#
+# В C0 на человеческих подписях оптимум был 0,6, но работать система будет на
+# машинных, а они слабее, и вес честнее брать оттуда: на подписях BLIP оптимум
+# сместился к 0,7, и разница не косметическая — при 0,6 Recall@5 ниже на 1,8 п.п.
+# Подбор в обоих замерах шёл на одной половине запросов, отчёт — на другой.
+CAPTION_FUSION_ALPHA = 0.7
+# Ниже этого покрытия слияние не включается.
+#
+# Оценки подписей приводятся к нулевому среднему по подписанным снимкам, и при
+# малом покрытии это фабрикует сигнал из ничего: лучшая из трёх подписей получает
+# высокую оценку просто потому, что она лучшая из трёх, а не потому, что отвечает
+# запросу. Такой снимок вылезает наверх, вытесняя честные находки CLIP.
+#
+# Пока база размечена меньше чем наполовину, поиск остаётся обычным. Это заметно
+# лучше, чем портить выдачу на всё время разметки.
+CAPTION_FUSION_MIN_COVERAGE = 0.5
+CAPTION_FUSION_MIN_PHOTOS = 10
 ALLOWED_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
 THUMB_SIZE = 320
 # Индекс сбрасывается на диск не после каждого батча: write_index на 5000 векторов — это
@@ -56,6 +92,10 @@ THUMB_SIZE = 320
 FLUSH_EVERY = 500
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+# Запрос -> вектор в пространстве подписей. Именно функция, а не модель: ядру
+# незачем знать, чем считается текстовый эмбеддинг.
+CaptionEncoderLike = Callable[[str], np.ndarray]
 
 
 # --------------------------------------------------------------------------
@@ -68,14 +108,24 @@ class Photo:
     filename: str
     bytes: int = 0
     added_at: str = ""
+    caption: str = ""
+    caption_model: str = ""  # чем сгенерирована — чтобы уметь перегенерировать
 
     def to_dict(self) -> dict:
-        return {
+        data = {
             "photo_id": self.photo_id,
             "filename": self.filename,
             "bytes": self.bytes,
             "added_at": self.added_at,
         }
+        # У базы без подписей meta остаётся ровно такой же, как была в v2: пустые
+        # поля в каждой из пяти тысяч записей — это лишние сотни килобайт и шум
+        # в диффе на ровном месте.
+        if self.caption:
+            data["caption"] = self.caption
+        if self.caption_model:
+            data["caption_model"] = self.caption_model
+        return data
 
 
 @dataclass
@@ -84,6 +134,7 @@ class SearchHit:
     score: float
     filename: str
     path: str
+    caption: str = ""  # чтобы показать человеку, почему снимок нашёлся
 
 
 @dataclass
@@ -109,6 +160,7 @@ class Stats:
     photos_bytes: int
     index_bytes: int
     has_captions: bool
+    captions_count: int = 0  # сколько снимков уже с подписью (покрытие неполное)
 
 
 class StoreError(RuntimeError):
@@ -149,6 +201,11 @@ def _file_photo_id(path: Path) -> str:
     return h.hexdigest()[:16]
 
 
+def _zscore(values: np.ndarray) -> np.ndarray:
+    """Нулевое среднее, единичный разброс. Константный вектор даёт нули, а не NaN."""
+    return (values - values.mean()) / (values.std() + 1e-9)
+
+
 def normalize_id(value) -> str:
     """
     Приводит числовой id к виду без ведущих нулей, чтобы '000000000139' и '139' считались
@@ -177,6 +234,10 @@ class IndexStore:
         self._captions_index = None
         self._captions_meta: list[dict] = []
         self._captions_loaded = False
+        self._sbert_index = None
+        self._sbert_rows: list[str] = []  # строка индекса -> photo_id
+        self._sbert_model = ""
+        self._sbert_loaded = False
         self._by_id = {p.photo_id: i for i, p in enumerate(photos)}
 
     # ------------------------------------------------------------------
@@ -232,12 +293,13 @@ class IndexStore:
     @staticmethod
     def _parse_meta(raw) -> tuple[list[Photo], bool]:
         """
-        Читает оба формата meta:
-          v2 (новый):  {"version": 2, "photos": [{"photo_id","filename","bytes","added_at"}]}
-          legacy:      [{"image_id": "...", "path": "data/images/..."}]
+        Читает все три формата meta:
+          v3 (текущий): к полям v2 добавлены "caption" и "caption_model"
+          v2:           {"version": 2, "photos": [{"photo_id","filename","bytes","added_at"}]}
+          legacy:       [{"image_id": "...", "path": "data/images/..."}]
         Legacy-формат нужен, чтобы веб мог открыть уже построенную базу COCO из index/.
         """
-        if isinstance(raw, dict) and raw.get("version") == META_VERSION:
+        if isinstance(raw, dict) and raw.get("version") in SUPPORTED_META_VERSIONS:
             return [Photo(**item) for item in raw["photos"]], False
 
         if isinstance(raw, list):
@@ -303,7 +365,8 @@ class IndexStore:
     def stats(self) -> Stats:
         index_bytes = sum(
             (self.root / name).stat().st_size
-            for name in (IMAGES_INDEX, IMAGES_META, CAPTIONS_INDEX, CAPTIONS_META)
+            for name in (IMAGES_INDEX, IMAGES_META, CAPTIONS_INDEX, CAPTIONS_META,
+                         CAPTIONS_SBERT_INDEX, CAPTIONS_SBERT_META)
             if (self.root / name).exists()
         )
         if self._legacy:
@@ -321,6 +384,7 @@ class IndexStore:
             photos_bytes=photos_bytes,
             index_bytes=index_bytes,
             has_captions=self._load_captions() is not None,
+            captions_count=sum(1 for p in self._photos if p.caption),
         )
 
     def iter_export_files(self) -> Iterator[tuple[str, Path]]:
@@ -490,6 +554,7 @@ class IndexStore:
             self._by_id = {p.photo_id: i for i, p in enumerate(self._photos)}
 
             self._drop_captions_of(targets)
+            self._drop_caption_vectors_of(targets)
             self._persist()
 
             # файлы удаляем после успешной записи индекса: если процесс упадёт раньше,
@@ -529,6 +594,196 @@ class IndexStore:
         _atomic_write_json(self.root / CAPTIONS_META, self._captions_meta)
 
     # ------------------------------------------------------------------
+    # Подписи
+    # ------------------------------------------------------------------
+    #
+    # Разделены намеренно: текст пишет генератор подписей (BLIP), векторы —
+    # текстовая модель (SBERT). Core не знает ни о том, ни о другом и принимает
+    # готовые значения, поэтому ни веб, ни бот не тянут лишних зависимостей.
+
+    def set_caption_texts(self, captions: dict[str, str], *, model: str = "") -> int:
+        """
+        Проставляет подписи снимкам. Неизвестные photo_id молча пропускаются:
+        генератор работает в фоне, и снимок мог быть удалён, пока его подпись
+        считалась, — это штатный ход событий, а не ошибка.
+        """
+        with self._lock:
+            if self._legacy:
+                raise StoreError("Legacy-база открыта только для чтения")
+            changed = 0
+            for photo_id, caption in captions.items():
+                row = self._by_id.get(photo_id)
+                if row is None:
+                    continue
+                self._photos[row].caption = caption
+                self._photos[row].caption_model = model
+                changed += 1
+            if changed:
+                self._persist()
+            return changed
+
+    def caption_of(self, photo_id: str) -> str:
+        photo = self.get_photo(photo_id)
+        return photo.caption if photo else ""
+
+    def photos_without_caption(self, limit: int | None = None) -> list[Photo]:
+        """Очередь работы для генератора подписей."""
+        pending = [p for p in self._photos if not p.caption]
+        return pending if limit is None else pending[:limit]
+
+    def captions_coverage(self) -> tuple[int, int]:
+        """(снимков с подписью, всего снимков)."""
+        return sum(1 for p in self._photos if p.caption), len(self._photos)
+
+    def set_caption_vectors(
+        self, vectors: dict[str, np.ndarray], *, model: str = ""
+    ) -> int:
+        """
+        Добавляет или заменяет векторы подписей. Индекс собирается заново из
+        объединения старых и новых строк: IndexFlatIP не умеет заменять вектор на
+        месте, а размер здесь мал (одна строка на снимок, а не пять, как у COCO).
+
+        Смена модели распознаётся по размерности: векторы другой длины означают
+        другой энкодер, и старые строки в таком случае выбрасываются — смешивать
+        два пространства в одном индексе нельзя, оценки были бы бессмысленны.
+        """
+        with self._lock:
+            if self._legacy:
+                raise StoreError("Legacy-база открыта только для чтения")
+
+            fresh = {
+                photo_id: np.asarray(vector, dtype="float32").reshape(-1)
+                for photo_id, vector in vectors.items()
+                if photo_id in self._by_id
+            }
+            if not fresh:
+                return 0
+
+            dims = {vector.shape[0] for vector in fresh.values()}
+            if len(dims) != 1:
+                raise StoreError(f"Векторы подписей разной размерности: {sorted(dims)}")
+            dim = dims.pop()
+
+            merged: dict[str, np.ndarray] = {}
+            self._load_caption_vectors()
+            if self._sbert_index is not None and self._sbert_index.d == dim:
+                stored = self._sbert_index.reconstruct_n(0, self._sbert_index.ntotal)
+                for row, photo_id in enumerate(self._sbert_rows):
+                    if photo_id in self._by_id:
+                        merged[photo_id] = stored[row]
+            merged.update(fresh)
+
+            index = faiss.IndexFlatIP(dim)
+            rows = list(merged.keys())
+            index.add(np.ascontiguousarray([merged[pid] for pid in rows], dtype="float32"))
+
+            self._sbert_index = index
+            self._sbert_rows = rows
+            self._sbert_model = model or self._sbert_model
+            self._sbert_loaded = True
+            self._persist_caption_vectors()
+            return len(fresh)
+
+    def search_captions(self, query_vector: np.ndarray, top_k: int = 5) -> list[CaptionHit]:
+        """
+        Поиск по подписям. Вектор запроса приходит готовым — кодирует его тот, кто
+        владеет текстовой моделью.
+
+        Строки, чьи снимки уже удалены, пропускаются: индекс подписей вторичен и
+        может отставать от базы, и это не повод отдавать наружу ссылки в никуда.
+        """
+        self._load_caption_vectors()
+        if self._sbert_index is None:
+            return []
+        emb = np.ascontiguousarray(
+            np.asarray(query_vector, dtype="float32").reshape(1, -1)
+        )
+        if emb.shape[1] != self._sbert_index.d:
+            raise StoreError(
+                f"Размерность запроса {emb.shape[1]} не совпадает с индексом "
+                f"подписей {self._sbert_index.d} — модель сменилась?"
+            )
+
+        hits: list[CaptionHit] = []
+        for row, score in self._search(self._sbert_index, emb, top_k, lambda r, s: (r, s)):
+            photo_id = self._sbert_rows[row]
+            photo = self.get_photo(photo_id)
+            if photo is None:
+                continue
+            hits.append(CaptionHit(photo_id=photo_id, score=score, caption=photo.caption))
+        return hits
+
+    def caption_index_model(self) -> str:
+        self._load_caption_vectors()
+        return self._sbert_model
+
+    def _load_caption_vectors(self):
+        """
+        Лениво читает индекс подписей. Расхождение числа векторов с собственным
+        списком строк означает, что индекс испорчен, — тогда поиск по подписям
+        просто выключается. Ронять базу целиком из-за вторичного индекса нельзя:
+        снимки и поиск по ним от этого не страдают.
+        """
+        if self._sbert_loaded:
+            return self._sbert_index
+        self._sbert_loaded = True
+
+        index_path = self.root / CAPTIONS_SBERT_INDEX
+        meta_path = self.root / CAPTIONS_SBERT_META
+        if not (index_path.exists() and meta_path.exists()):
+            return None
+        try:
+            index = faiss.read_index(str(index_path))
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            rows = list(meta["rows"])
+        except (OSError, ValueError, KeyError, RuntimeError) as e:
+            print(f"[индекс подписей не прочитан] {self.root}: {e}")
+            return None
+
+        if index.ntotal != len(rows):
+            print(
+                f"[индекс подписей рассогласован] {self.root}: {index.ntotal} векторов "
+                f"против {len(rows)} строк — поиск по подписям выключен"
+            )
+            return None
+
+        self._sbert_index = index
+        self._sbert_rows = rows
+        self._sbert_model = meta.get("model", "")
+        return self._sbert_index
+
+    def _persist_caption_vectors(self) -> None:
+        _atomic_write_index(self.root / CAPTIONS_SBERT_INDEX, self._sbert_index)
+        _atomic_write_json(
+            self.root / CAPTIONS_SBERT_META,
+            {
+                "version": CAPTIONS_SBERT_VERSION,
+                "model": self._sbert_model,
+                "rows": self._sbert_rows,
+            },
+        )
+
+    def _drop_caption_vectors_of(self, photo_ids: set[str]) -> None:
+        """
+        Выбрасывает векторы удалённых снимков.
+
+        Здесь и видно, зачем индексу подписей собственный список photo_id: удаляют
+        обычно снимок, у которого подписи ещё нет, и при позиционной адресации все
+        последующие строки уехали бы на единицу, тихо переклеив подписи на чужие
+        фотографии.
+        """
+        if self._load_caption_vectors() is None:
+            return
+        keep = [row for row, photo_id in enumerate(self._sbert_rows)
+                if photo_id not in photo_ids]
+        if len(keep) == len(self._sbert_rows):
+            return
+        self._sbert_index = self._rebuild_index(self._sbert_index, keep)
+        self._sbert_rows = [self._sbert_rows[row] for row in keep]
+        self._persist_caption_vectors()
+
+    # ------------------------------------------------------------------
     # Поиск
     # ------------------------------------------------------------------
 
@@ -538,12 +793,127 @@ class IndexStore:
         top_k: int = 5,
         translate: bool = True,
         holder: ModelHolder | None = None,
+        caption_encoder: "CaptionEncoderLike | None" = None,
+        alpha: float = CAPTION_FUSION_ALPHA,
     ) -> tuple[str, list[SearchHit]]:
-        """Возвращает (использованный запрос, результаты). Пустая база -> пустой список."""
+        """
+        Возвращает (использованный запрос, результаты). Пустая база -> пустой список.
+
+        caption_encoder — то, чем кодировать запрос для поиска по подписям. Передаётся
+        функцией, а не моделью: ядро не должно зависеть от конкретного текстового
+        энкодера. Если его нет или в базе нет ни одной подписи, работает обычный CLIP.
+
+        Кодируется именно used_query, то есть уже переведённый текст: подписи
+        генерируются на английском, и слать в текстовую модель русский оригинал
+        значило бы сравнивать разные языки.
+        """
         holder = holder or ModelHolder.get()
         used_query = maybe_translate(query, self.root / TRANSLATE_CACHE_FILE, translate)
         emb = holder.encode_texts([used_query])
+
+        if caption_encoder is not None and self.fusion_ready():
+            return used_query, self._search_fused(emb, caption_encoder(used_query),
+                                                  top_k, alpha)
         return used_query, self._search(self._index, emb, top_k, self._hit_from_photo)
+
+    def fusion_ready(self) -> bool:
+        """
+        Хватает ли подписей, чтобы слияние помогало, а не мешало. Пороги и причина —
+        рядом с CAPTION_FUSION_MIN_COVERAGE.
+        """
+        if self._load_caption_vectors() is None or not self._photos:
+            return False
+        covered = self._sbert_index.ntotal
+        return (
+            covered >= CAPTION_FUSION_MIN_PHOTOS
+            and covered / len(self._photos) >= CAPTION_FUSION_MIN_COVERAGE
+        )
+
+    def _search_fused(
+        self, emb: np.ndarray, caption_vector: np.ndarray, top_k: int, alpha: float
+    ) -> list[SearchHit]:
+        """
+        Слияние двух путей поиска — ровно то, что мерилось в C0.
+
+        Там оценки приводились к нулевому среднему и единичному разбросу по ВСЕМ
+        кандидатам, и повторить это надо в точности: у CLIP косинусы плотно сидят
+        около 0.2-0.3, у текстовой модели разброс шире, и сложение сырых оценок
+        отдало бы вес просто тому, у кого шкала растянутее. Поэтому берём у FAISS
+        полную выдачу, а не top_k: нормировать по верхушке списка нельзя, среднее
+        и разброс по ней — не те же самые числа.
+
+        Снимок без подписи получает по второму пути ноль, то есть ровно среднее.
+        Это нейтральная подстановка: отсутствие подписи не повышает и не понижает
+        снимок, а оставляет его на том месте, куда его поставил CLIP. Штрафовать
+        такие снимки было бы неверно — база размечается постепенно, и в середине
+        разметки половина фотографий просто ещё не дошла до очереди.
+        """
+        with self._lock:
+            total = self._index.ntotal
+            if total == 0 or top_k <= 0:
+                return []
+
+            clip_scores = self._full_scores(self._index, emb, total)
+
+            caption_z = np.zeros(total, dtype="float32")
+            vector = np.ascontiguousarray(
+                np.asarray(caption_vector, dtype="float32").reshape(1, -1)
+            )
+            if vector.shape[1] != self._sbert_index.d:
+                raise StoreError(
+                    f"Размерность запроса {vector.shape[1]} не совпадает с индексом "
+                    f"подписей {self._sbert_index.d} — модель сменилась?"
+                )
+            raw = self._full_scores(self._sbert_index, vector, self._sbert_index.ntotal)
+            raw_z = _zscore(raw)
+            for row, photo_id in enumerate(self._sbert_rows):
+                position = self._by_id.get(photo_id)
+                if position is not None:
+                    caption_z[position] = raw_z[row]
+
+            fused = alpha * _zscore(clip_scores) + (1 - alpha) * caption_z
+            best = np.argsort(-fused)[:top_k]
+            return [self._hit_from_photo(int(row), float(fused[row])) for row in best]
+
+    @staticmethod
+    def _full_scores(index, emb: np.ndarray, total: int) -> np.ndarray:
+        """
+        Оценки по всем векторам индекса в порядке строк. FAISS всё равно сканирует
+        индекс целиком, поэтому полная выдача вместо top_k стоит почти столько же:
+        на индексе COCO (5022 вектора, dim 512) замерено 1,30 мс против 0,84 мс.
+
+        На фоне запроса это ничто — время уходит в энкодеры, а не в поиск. Дороже
+        обходится сам второй путь: подпись запроса надо закодировать текстовой
+        моделью, и это единственная заметная добавка слияния.
+        """
+        scores, rows = index.search(emb, total)
+        full = np.zeros(total, dtype="float32")
+        full[rows[0]] = scores[0]
+        return full
+
+    def search_similar(self, photo_id: str, top_k: int = 5) -> list[SearchHit]:
+        """
+        Похожие на снимок, который уже лежит в базе.
+
+        Эмбеддинг заново не считается: вектор снимка уже есть в индексе, и
+        reconstruct достаёт его обратно. Для сценария «прислал фото — покажи
+        похожие» это убирает второй прогон энкодера, то есть примерно половину
+        всей работы.
+
+        Сам снимок из выдачи исключается: показывать человеку его же фотографию
+        как «самую похожую» бессмысленно, а первое место она займёт всегда.
+        """
+        with self._lock:
+            row = self._by_id.get(photo_id)
+            if row is None or self._index.ntotal == 0:
+                return []
+            vector = np.ascontiguousarray(
+                self._index.reconstruct(row).reshape(1, -1), dtype="float32"
+            )
+
+        # берём на один больше, чтобы после выброса самого снимка осталось top_k
+        hits = self._search(self._index, vector, top_k + 1, self._hit_from_photo)
+        return [hit for hit in hits if hit.photo_id != photo_id][:top_k]
 
     def search_image(
         self,
@@ -591,6 +961,7 @@ class IndexStore:
             score=score,
             filename=photo.filename,
             path=str(self.photo_path(photo)),
+            caption=photo.caption,
         )
 
     # ------------------------------------------------------------------
@@ -598,12 +969,21 @@ class IndexStore:
     # ------------------------------------------------------------------
 
     def _persist(self) -> None:
-        """Атомарная запись индекса и meta: сначала .tmp, затем os.replace."""
+        """
+        Атомарная запись индекса и meta: сначала .tmp, затем os.replace.
+
+        Версия проставляется по факту: пока в базе нет ни одной подписи, файл
+        остаётся ровно таким же, как писала предыдущая версия кода. Это не
+        косметика — данные общие между локальным запуском и контейнерами, и
+        собранный ранее образ на meta v3 просто не откроет базу. Так окно
+        несовместимости появляется только у тех баз, где подписи и правда есть.
+        """
         self.root.mkdir(parents=True, exist_ok=True)
+        version = META_VERSION if any(p.caption for p in self._photos) else 2
         _atomic_write_index(self.root / IMAGES_INDEX, self._index)
         _atomic_write_json(
             self.root / IMAGES_META,
-            {"version": META_VERSION, "photos": [p.to_dict() for p in self._photos]},
+            {"version": version, "photos": [p.to_dict() for p in self._photos]},
         )
 
     def _load_captions(self):

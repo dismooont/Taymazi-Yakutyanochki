@@ -54,6 +54,7 @@ class DatabaseOut(BaseModel):
     index_bytes: int
     total_bytes: int
     has_captions: bool
+    captions_count: int = 0  # сколько снимков уже размечено — для индикатора прогресса
     status: str
     # kind и read_only нужны интерфейсу, чтобы не предлагать действий, которые
     # заведомо получат отказ: у демо-базы нет ни удаления, ни добавления снимков
@@ -77,6 +78,7 @@ class DatabaseOut(BaseModel):
             index_bytes=row["index_bytes"],
             total_bytes=row["photos_bytes"] + row["index_bytes"],
             has_captions=bool(row["has_captions"]),
+            captions_count=row["captions_count"] if "captions_count" in row.keys() else 0,
             status=row["status"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],
@@ -121,6 +123,7 @@ class SearchHitOut(BaseModel):
     score: float
     thumb_url: str
     file_url: str
+    caption: str = ""  # подпись снимка, если она уже сгенерирована
 
 
 class CaptionHitOut(BaseModel):
@@ -139,6 +142,9 @@ class SearchResultOut(BaseModel):
     used_query: str | None = None
     results: list[SearchHitOut] = Field(default_factory=list)
     captions: list[CaptionHitOut] = Field(default_factory=list)
+    # Отработало ли слияние с поиском по подписям. Нужно фронту, чтобы не
+    # показывать оценку слияния как косинус: это разные величины.
+    fused: bool = False
 
 
 class JobOut(BaseModel):
@@ -178,11 +184,13 @@ class BotChatOut(BaseModel):
     total_bytes: int
     created: bool = False
     added: int = 0
+    # id только что добавленного снимка: по нему бот сразу просит похожие
+    photo_id: str | None = None
     skipped: list[tuple[str, str]] = Field(default_factory=list)
 
     @classmethod
     def from_row(cls, row: dict, *, created: bool = False, added: int = 0,
-                 skipped: list | None = None) -> "BotChatOut":
+                 photo_id: str | None = None, skipped: list | None = None) -> "BotChatOut":
         return cls(
             database_id=row["id"],
             name=row["name"],
@@ -190,6 +198,7 @@ class BotChatOut(BaseModel):
             total_bytes=row["photos_bytes"] + row["index_bytes"],
             created=created,
             added=added,
+            photo_id=photo_id,
             skipped=skipped or [],
         )
 

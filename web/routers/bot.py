@@ -130,7 +130,9 @@ def add_photo(
 
     outcome = services.add_photo_paths(database, [target], staging, {name: name})
     fresh = db.get_database(database["id"])
-    return BotChatOut.from_row(fresh, added=outcome["added"], skipped=outcome["skipped"])
+    return BotChatOut.from_row(
+        fresh, added=outcome["added"], photo_id=outcome["photo_id"], skipped=outcome["skipped"]
+    )
 
 
 @router.post("/chats/{chat_id}/search", response_model=BotSearchResultOut)
@@ -154,8 +156,78 @@ def search_chat(chat_id: str, payload: BotSearchRequest, _: ServiceAuth) -> BotS
     )
 
 
+@router.get("/chats/{chat_id}/photos/{photo_id}/similar", response_model=BotSearchResultOut)
+def similar_photos(chat_id: str, photo_id: str, _: ServiceAuth, top_k: int = 5) -> BotSearchResultOut:
+    """
+    Похожие на снимок, уже лежащий в базе. Именно так работает сценарий
+    «прислал фото — покажи похожие»: эмбеддинг не считается заново, вектор
+    берётся из индекса.
+    """
+    database = _chat_database(chat_id)
+    store = store_for(database)
+    hits = store.search_similar(photo_id, top_k=max(1, min(top_k, 20)))
+    return BotSearchResultOut(
+        used_query="",
+        results=[
+            SearchHitOut(
+                photo_id=hit.photo_id,
+                score=round(hit.score, 4),
+                thumb_url=f"/api/bot/chats/{chat_id}/photos/{hit.photo_id}/file",
+                file_url=f"/api/bot/chats/{chat_id}/photos/{hit.photo_id}/file",
+            )
+            for hit in hits
+        ],
+    )
+
+
 @router.get("/chats/{chat_id}/photos/{photo_id}/file")
 def photo_file(chat_id: str, photo_id: str, _: ServiceAuth) -> FileResponse:
     """Бот забирает найденный снимок, чтобы отправить его в чат."""
     database = _chat_database(chat_id)
     return FileResponse(resolve_photo_file(database, photo_id, thumb=False))
+
+
+# --------------------------------------------------------------------------
+# Демо-база
+# --------------------------------------------------------------------------
+
+def _demo_database() -> dict[str, Any]:
+    """
+    Общая база MS COCO. Доступна из любого чата и только на чтение, поэтому
+    ни владения, ни участия здесь не проверяется — проверять нечего.
+    """
+    database = db.get_demo_database()
+    if database is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Демо-база не подключена")
+    return database
+
+
+@router.get("/demo", response_model=BotChatOut)
+def demo_info(_: ServiceAuth) -> BotChatOut:
+    return BotChatOut.from_row(_demo_database())
+
+
+@router.post("/demo/search", response_model=BotSearchResultOut)
+def search_demo(payload: BotSearchRequest, _: ServiceAuth) -> BotSearchResultOut:
+    database = _demo_database()
+    store = store_for(database)
+    used_query, hits = store.search_text(
+        payload.query.strip(), top_k=payload.top_k, translate=payload.translate
+    )
+    return BotSearchResultOut(
+        used_query=used_query,
+        results=[
+            SearchHitOut(
+                photo_id=hit.photo_id,
+                score=round(hit.score, 4),
+                thumb_url=f"/api/bot/demo/photos/{hit.photo_id}/file",
+                file_url=f"/api/bot/demo/photos/{hit.photo_id}/file",
+            )
+            for hit in hits
+        ],
+    )
+
+
+@router.get("/demo/photos/{photo_id}/file")
+def demo_photo_file(photo_id: str, _: ServiceAuth) -> FileResponse:
+    return FileResponse(resolve_photo_file(_demo_database(), photo_id, thumb=False))

@@ -160,6 +160,111 @@ export function Dropzone({
 }
 
 /* ------------------------------------------------------------------ */
+/* Область для перетаскивания и вставки из буфера                      */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Крупная зона приёма снимков: перетаскивание, выбор файлом и вставка из буфера.
+ *
+ * Вставка слушается на всём документе, а не только на самой зоне: чтобы поймать
+ * событие на элементе, его пришлось бы сначала сфокусировать, а человек, нажимая
+ * Ctrl+V, ни на что не нажимал — он только что сделал снимок экрана.
+ *
+ * Из буфера берутся только элементы-файлы с типом image/*. Обычный текст сюда
+ * не попадает, поэтому вставка в поле поиска продолжает работать как обычно.
+ */
+export function DropArea({
+  onFiles,
+  disabled,
+  hint,
+}: {
+  onFiles: (files: File[]) => void
+  disabled?: boolean
+  hint?: string
+}) {
+  const [over, setOver] = useState(false)
+  const [flash, setFlash] = useState<string | null>(null)
+  const input = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (disabled) return
+
+    const onPaste = (event: ClipboardEvent) => {
+      const files = Array.from(event.clipboardData?.items ?? [])
+        .filter((item) => item.kind === 'file' && item.type.startsWith('image/'))
+        .map((item) => item.getAsFile())
+        .filter((file): file is File => file !== null)
+      if (!files.length) return
+
+      event.preventDefault()
+      // у снимка экрана имени нет — подставляем своё, иначе на сервер уйдёт «blob»
+      const named = files.map((file, index) =>
+        file.name && file.name !== 'image.png'
+          ? file
+          : new File([file], `вставка-${Date.now()}-${index + 1}.png`, { type: file.type }),
+      )
+      setFlash(`Вставлено из буфера: ${named.length}`)
+      onFiles(named)
+    }
+
+    document.addEventListener('paste', onPaste)
+    return () => document.removeEventListener('paste', onPaste)
+  }, [onFiles, disabled])
+
+  useEffect(() => {
+    if (!flash) return
+    const timer = setTimeout(() => setFlash(null), 2500)
+    return () => clearTimeout(timer)
+  }, [flash])
+
+  if (disabled) return null
+
+  const take = (list: FileList | null) => {
+    const files = Array.from(list ?? []).filter((file) => file.type.startsWith('image/'))
+    if (files.length) onFiles(files)
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        className="droparea"
+        data-over={over}
+        onClick={() => input.current?.click()}
+        onDragOver={(event) => {
+          event.preventDefault()
+          setOver(true)
+        }}
+        onDragLeave={() => setOver(false)}
+        onDrop={(event) => {
+          event.preventDefault()
+          setOver(false)
+          take(event.dataTransfer.files)
+        }}
+      >
+        <span className="droparea__title">
+          {over ? 'Отпустите — заберу' : 'Перетащите снимки сюда'}
+        </span>
+        <span className="note">
+          {flash ?? hint ?? 'Или нажмите, чтобы выбрать файлы. Скриншот можно вставить: Ctrl+V'}
+        </span>
+      </button>
+      <input
+        ref={input}
+        type="file"
+        accept="image/*"
+        multiple
+        hidden
+        onChange={(event) => {
+          take(event.target.files)
+          event.target.value = '' // тот же файл можно выбрать повторно
+        }}
+      />
+    </>
+  )
+}
+
+/* ------------------------------------------------------------------ */
 /* Сетка снимков                                                       */
 /* ------------------------------------------------------------------ */
 
@@ -168,17 +273,31 @@ export interface Tile {
   thumbUrl: string
   fileUrl: string
   score?: number
+  caption?: string
 }
 
 export function PhotoGrid({
   tiles,
   onRemove,
+  fused = false,
 }: {
   tiles: Tile[]
   onRemove?: (photoId: string) => void
+  /** Выдача получена слиянием с поиском по подписям — оценка тогда не косинус. */
+  fused?: boolean
 }) {
   const [zoomed, setZoomed] = useState<string | null>(null)
-  const best = tiles.reduce((max, tile) => Math.max(max, tile.score ?? 0), 0)
+
+  // Обычная оценка — косинус, он неотрицателен, и полоску можно мерить от нуля.
+  // Оценка слияния — взвешенная сумма отклонений от среднего, и она свободно
+  // уходит в минус: у половины выдачи она отрицательна по построению. Меряя её
+  // от нуля, мы получили бы отрицательную ширину, то есть пустую полоску у всего
+  // нижнего хвоста.
+  const scores = tiles.map((tile) => tile.score ?? 0)
+  const best = scores.length ? Math.max(...scores) : 0
+  const floor = fused && scores.length ? Math.min(...scores) : 0
+  const span = best - floor
+  const fill = (score: number) => (span > 0 ? ((score - floor) / span) * 100 : 0)
 
   useEffect(() => {
     if (!zoomed) return
@@ -204,21 +323,31 @@ export function PhotoGrid({
             {tile.score !== undefined && (
               <div className="proximity">
                 {/* длина линии — близость относительно первого места в этой выдаче */}
-                <div
-                  className="proximity__fill"
-                  style={{ width: `${best > 0 ? (tile.score / best) * 100 : 0}%` }}
-                />
+                <div className="proximity__fill" style={{ width: `${fill(tile.score)}%` }} />
               </div>
             )}
 
             <figcaption className="card__foot">
               <span className="card__id">{tile.photoId.slice(0, 8)}</span>
               {tile.score !== undefined && (
-                <span className="card__score" title="Косинусная близость к запросу">
+                <span
+                  className="card__score"
+                  title={
+                    fused
+                      ? 'Оценка слияния: поиск по снимку и по подписи вместе'
+                      : 'Косинусная близость к запросу'
+                  }
+                >
                   {formatScore(tile.score)}
                 </span>
               )}
             </figcaption>
+
+            {tile.caption && (
+              <p className="card__caption" title={tile.caption}>
+                {tile.caption}
+              </p>
+            )}
 
             {onRemove && (
               <button
