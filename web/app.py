@@ -17,6 +17,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from web import db
+from web.captioning import activity, caption_worker
 from web.config import get_settings
 from web.jobs import job_queue, recover_interrupted_jobs
 from web.routers import auth, bot, databases, export, jobs, photos, search
@@ -98,6 +99,7 @@ async def lifespan(app: FastAPI):
         print(f"Задач прервано прошлым перезапуском: {interrupted}")
     job_queue.start()
     _register_demo_database()
+    caption_worker.start()
 
     print(f"Данные: {settings.data_dir} | регистрация: "
           f"{'открыта' if settings.registration_open else 'закрыта'} | "
@@ -110,6 +112,7 @@ async def lifespan(app: FastAPI):
     try:
         yield
     finally:
+        caption_worker.stop()
         job_queue.stop()
 
 
@@ -138,6 +141,17 @@ def create_app() -> FastAPI:
                     status_code=status.HTTP_403_FORBIDDEN,
                     content={"detail": "Отсутствует заголовок X-Requested-With"},
                 )
+        return await call_next(request)
+
+    @app.middleware("http")
+    async def mark_activity(request: Request, call_next):
+        # Фоновая разметка отступает, пока людям отвечает API. Свои же
+        # healthcheck-проверки и обращения бота активностью не считаем:
+        # healthcheck идёт каждые несколько секунд и не дал бы простою наступить
+        # никогда, а бот — не человек у экрана, ему подождать не жалко.
+        path = request.url.path
+        if path != "/api/health" and not path.startswith("/api/bot/"):
+            activity.touch()
         return await call_next(request)
 
     app.include_router(auth.router)

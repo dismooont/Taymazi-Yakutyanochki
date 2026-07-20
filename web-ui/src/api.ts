@@ -27,6 +27,8 @@ export interface Database {
   index_bytes: number
   total_bytes: number
   has_captions: boolean
+  /** сколько снимков уже размечено подписями — фоновая разметка идёт постепенно */
+  captions_count: number
   status: string
   /** personal — своя база, chat — база Telegram-чата, demo — общая витрина */
   kind: 'personal' | 'chat' | 'demo'

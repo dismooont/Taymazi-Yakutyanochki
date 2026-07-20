@@ -49,7 +49,12 @@ class CaptionEncoder:
 
     @property
     def dim(self) -> int:
-        return int(self._load().get_sentence_embedding_dimension())
+        model = self._load()
+        # Метод переименован в новых версиях sentence-transformers; старое имя ещё
+        # работает, но шумит FutureWarning. Берём новое, откатываясь на старое.
+        getter = getattr(model, "get_embedding_dimension", None) or \
+            model.get_sentence_embedding_dimension
+        return int(getter())
 
     def _load(self):
         if self._model is None:

@@ -129,6 +129,7 @@ def sync_stats(database_id: str, store: IndexStore) -> dict:
         photos_bytes=stats.photos_bytes,
         index_bytes=stats.index_bytes,
         has_captions=stats.has_captions,
+        captions_count=stats.captions_count,
         preview=preview,
     )
     return db.get_database(database_id)

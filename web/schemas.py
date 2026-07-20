@@ -54,6 +54,7 @@ class DatabaseOut(BaseModel):
     index_bytes: int
     total_bytes: int
     has_captions: bool
+    captions_count: int = 0  # сколько снимков уже размечено — для индикатора прогресса
     status: str
     # kind и read_only нужны интерфейсу, чтобы не предлагать действий, которые
     # заведомо получат отказ: у демо-базы нет ни удаления, ни добавления снимков
@@ -77,6 +78,7 @@ class DatabaseOut(BaseModel):
             index_bytes=row["index_bytes"],
             total_bytes=row["photos_bytes"] + row["index_bytes"],
             has_captions=bool(row["has_captions"]),
+            captions_count=row["captions_count"] if "captions_count" in row.keys() else 0,
             status=row["status"],
             created_at=row["created_at"],
             updated_at=row["updated_at"],

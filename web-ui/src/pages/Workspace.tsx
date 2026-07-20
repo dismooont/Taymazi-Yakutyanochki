@@ -155,6 +155,9 @@ export function Workspace() {
           </h1>
           <p className="mono" style={{ color: 'var(--muted)', margin: '6px 0 0' }}>
             {formatPhotos(database.photos_count)} · {formatBytes(database.total_bytes)}
+            {database.captions_count > 0 && database.captions_count < database.photos_count && (
+              <> · размечено {database.captions_count} из {database.photos_count}</>
+            )}
           </p>
         </div>
 

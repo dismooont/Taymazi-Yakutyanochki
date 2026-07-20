@@ -58,6 +58,11 @@ class Settings:
     service_token: str
     caption_search_enabled: bool
     caption_model: str
+    caption_auto_enabled: bool
+    caption_idle_seconds: float
+    caption_force_after: float
+    caption_threads: int | None
+    caption_blip_model: str
 
     @property
     def db_path(self) -> Path:
@@ -133,6 +138,21 @@ def get_settings() -> Settings:
         # Замер пользы — docs/CAPTION_SEARCH.md.
         caption_search_enabled=_flag("CAPTION_SEARCH_ENABLED", False),
         caption_model=os.environ.get("CAPTION_MODEL", DEFAULT_CAPTION_MODEL).strip(),
+        # Фоновая генерация подписей (C4). Отдельный флаг от caption_search: искать
+        # можно и по подписям, сгенерированным заранее командой, не запуская BLIP
+        # в вебе вовсе.
+        caption_auto_enabled=_flag("CAPTION_AUTO_ENABLED", False),
+        # Порог простоя: столько секунд без запросов, чтобы начать размечать.
+        caption_idle_seconds=float(_int("CAPTION_IDLE_SECONDS", 30)),
+        # Раз в столько секунд размечаем даже под нагрузкой — иначе активный
+        # пользователь не даст разметить свою базу никогда.
+        caption_force_after=float(_int("CAPTION_FORCE_AFTER", 600)),
+        # Сколько ядер отдать BLIP. None — не ограничивать. Меньшее число замедляет
+        # разметку, зато оставляет поиску воздух.
+        caption_threads=(_int("CAPTION_THREADS", 0) or None),
+        caption_blip_model=os.environ.get(
+            "CAPTION_BLIP_MODEL", "Salesforce/blip-image-captioning-base"
+        ).strip(),
     )
 
 

@@ -56,6 +56,7 @@ CREATE TABLE IF NOT EXISTS databases (
     photos_bytes INTEGER NOT NULL DEFAULT 0,
     index_bytes  INTEGER NOT NULL DEFAULT 0,
     has_captions INTEGER NOT NULL DEFAULT 0,
+    captions_count INTEGER NOT NULL DEFAULT 0,    -- сколько снимков размечено (C4)
     status       TEXT NOT NULL DEFAULT 'ready',   -- ready | indexing | error
     preview      TEXT NOT NULL DEFAULT '',        -- photo_id первых снимков, через запятую
     created_at   TEXT NOT NULL,
@@ -145,6 +146,7 @@ LATER_COLUMNS = {
         "kind": "TEXT NOT NULL DEFAULT 'personal'",
         "telegram_chat_id": "TEXT",
         "read_only": "INTEGER NOT NULL DEFAULT 0",
+        "captions_count": "INTEGER NOT NULL DEFAULT 0",
     },
 }
 
@@ -319,6 +321,33 @@ def list_databases(user_id: str) -> list[dict[str, Any]]:
     return [dict(row) for row in rows]
 
 
+def list_captionable_databases() -> list[dict[str, Any]]:
+    """
+    Базы, которые имеет смысл размечать подписями, по всем пользователям.
+
+    Демо-база исключена: она открыта только на чтение и лежит в index/, писать
+    туда нельзя. Пустые тоже — размечать в них нечего. Порядок от меньших к
+    большим: маленькая база доходит до порога покрытия за один-два прохода и
+    начинает приносить пользу, пока большая ещё в начале.
+    """
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT * FROM databases"
+            " WHERE kind != 'demo' AND COALESCE(read_only, 0) = 0 AND photos_count > 0"
+            " ORDER BY photos_count ASC"
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def has_any_active_job() -> bool:
+    """Идёт ли сейчас хоть какая-нибудь пользовательская задача."""
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM jobs WHERE status IN (?, ?) LIMIT 1", ACTIVE_JOB_STATUSES
+        ).fetchone()
+    return row is not None
+
+
 def count_databases(user_id: str) -> int:
     """Только личные базы: квота считает то, что человек создал сам."""
     with connect() as conn:
@@ -375,14 +404,14 @@ def rename_database(database_id: str, name: str) -> None:
 
 
 def update_database_stats(database_id: str, *, photos_count: int, photos_bytes: int,
-                          index_bytes: int, has_captions: bool,
+                          index_bytes: int, has_captions: bool, captions_count: int = 0,
                           preview: list[str] | None = None) -> None:
     with connect() as conn:
         conn.execute(
             "UPDATE databases SET photos_count = ?, photos_bytes = ?, index_bytes = ?,"
-            " has_captions = ?, preview = ?, updated_at = ? WHERE id = ?",
+            " has_captions = ?, captions_count = ?, preview = ?, updated_at = ? WHERE id = ?",
             (photos_count, photos_bytes, index_bytes, int(has_captions),
-             ",".join(preview or []), now(), database_id),
+             captions_count, ",".join(preview or []), now(), database_id),
         )
 
 
