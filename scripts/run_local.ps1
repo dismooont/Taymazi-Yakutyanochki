@@ -123,9 +123,20 @@ if (-not $NoBot) {
     $envFile = Join-Path $root ".env"
     $hasToken = (Test-Path $envFile) -and ((Get-Content $envFile -Raw) -match "TELEGRAM_BOT_TOKEN\s*=\s*\S")
     if ($hasToken) {
-        Say "  Бот      -> long polling через API на :$ApiPort" "Green"
-        $env:API_URL = "http://127.0.0.1:$ApiPort"
-        Start-Process -FilePath $python -ArgumentList "-m", "bot.bot" -WorkingDirectory $root
+        # Telegram отдаёт обновления только одному потребителю getUpdates на токен.
+        # Второй экземпляр не падает, а бесконечно получает Conflict и отбирает
+        # сообщения у первого — со стороны выглядит как «бот отвечает через раз».
+        $already = @(Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue |
+            Where-Object { $_.CommandLine -like "*bot.bot*" })
+        if ($already.Count -gt 0) {
+            Say "  Бот уже запущен (pid: $($already.ProcessId -join ', ')) — второй не поднимаю" "Yellow"
+            Say "  Остановить: Stop-Process -Id $($already[0].ProcessId)" "DarkGray"
+        }
+        else {
+            Say "  Бот      -> long polling через API на :$ApiPort" "Green"
+            $env:API_URL = "http://127.0.0.1:$ApiPort"
+            Start-Process -FilePath $python -ArgumentList "-m", "bot.bot" -WorkingDirectory $root
+        }
     }
     else {
         Say "  Бот не запущен: в .env нет TELEGRAM_BOT_TOKEN (это нормально)" "DarkGray"
