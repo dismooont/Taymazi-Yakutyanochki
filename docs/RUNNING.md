@@ -181,7 +181,7 @@ docker compose up -d web ui
 | Пароль забыт | `.\.venv\Scripts\python.exe -m web.admin reset-password --login <логин> --password <новый>` |
 | Бот молчит в группе | Не выполнен `/setprivacy` → Disable у @BotFather |
 | Бот не отвечает нигде | Проверьте `SERVICE_TOKEN` в `.env` и лог: `docker compose logs bot` |
-| Бот отвечает через раз | Запущено несколько экземпляров: в логе `TelegramConflictError`. Найти: `Get-CimInstance Win32_Process -Filter "Name='python.exe'" \| Where-Object { $_.CommandLine -like "*bot.bot*" }` — оставить один |
+| Бот отвечает через раз | Запущено несколько экземпляров: в логе `TelegramConflictError`. Надёжнее всего снять все и поднять заново: `Get-CimInstance Win32_Process -Filter "Name='python.exe'" \| Where-Object { $_.CommandLine -like "*bot.bot*" } \| ForEach-Object { Stop-Process -Id $_.ProcessId -Force }`, затем `.\scripts\run_local.ps1`. Считать экземпляры по числу процессов нельзя: один живой бот — это два `python.exe` |
 | Бот отвечает «Не знаю такой команды» | Так и задумано: неизвестные команды не уходят в поиск |
 | Скрипт `.ps1` не запускается | Файл скачан из интернета: `Unblock-File .\scripts\run_local.ps1` |
 | Ошибки про два процесса или битый индекс | Подняты и Docker, и локальный запуск одновременно. Оставьте что-то одно |

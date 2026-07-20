@@ -76,23 +76,45 @@ if (-not $npm -and -not $ApiOnly) {
     exit 1
 }
 
+# Порт может быть занят нашим же API с прошлого запуска — тогда второй поднимать
+# не нужно и нельзя. Отличаем свой живой API от чужого процесса по /api/health:
+# просто «порт занят -> выход» мешало бы дозапустить недостающие части.
+$apiAlready = $false
 if (Test-PortBusy $ApiPort) {
-    Say "  Порт $ApiPort занят — освободите его или укажите другой: -ApiPort 8001" "Red"
-    exit 1
+    try {
+        $health = Invoke-RestMethod "http://127.0.0.1:$ApiPort/api/health" -TimeoutSec 5
+        $apiAlready = ($health.status -eq "ok")
+    }
+    catch { $apiAlready = $false }
+
+    if (-not $apiAlready) {
+        Say "  Порт $ApiPort занят чужим процессом — освободите его или укажите другой: -ApiPort 8001" "Red"
+        exit 1
+    }
 }
 
 # --- API --------------------------------------------------------------------
 
 Say ""
-Say "  API      -> http://127.0.0.1:$ApiPort" "Green"
-Say "             первый запуск ждёт загрузки модели, это 15-30 секунд"
-Start-Process -FilePath $python `
-    -ArgumentList "-m", "uvicorn", "web.app:app", "--port", "$ApiPort" `
-    -WorkingDirectory $root
+if ($apiAlready) {
+    Say "  API      -> http://127.0.0.1:$ApiPort (уже работает, не поднимаю второй)" "Green"
+}
+else {
+    Say "  API      -> http://127.0.0.1:$ApiPort" "Green"
+    Say "             первый запуск ждёт загрузки модели, это 15-30 секунд"
+    Start-Process -FilePath $python `
+        -ArgumentList "-m", "uvicorn", "web.app:app", "--port", "$ApiPort" `
+        -WorkingDirectory $root
+}
 
 # --- фронтенд ---------------------------------------------------------------
 
-if (-not $ApiOnly) {
+if (-not $ApiOnly -and (Test-PortBusy $UiPort)) {
+    # Vite при занятом порте молча берёт следующий (5174), и человек продолжает
+    # смотреть на старую вкладку, не понимая, почему правок не видно.
+    Say "  Интерфейс -> http://localhost:$UiPort (уже работает, не поднимаю второй)" "Green"
+}
+elseif (-not $ApiOnly) {
     if (-not (Test-Path (Join-Path $root "web-ui\node_modules"))) {
         Say "  Ставлю зависимости фронтенда (один раз)..." "Yellow"
         & $npm --prefix web-ui install --no-audit --no-fund
@@ -126,6 +148,9 @@ if (-not $NoBot) {
         # Telegram отдаёт обновления только одному потребителю getUpdates на токен.
         # Второй экземпляр не падает, а бесконечно получает Conflict и отбирает
         # сообщения у первого — со стороны выглядит как «бот отвечает через раз».
+        # Учтите: один живой бот — это ДВА процесса python.exe (родитель и его
+        # ребёнок), так что считать экземпляры по их числу нельзя, только по факту
+        # «есть хоть один».
         $already = @(Get-CimInstance Win32_Process -Filter "Name='python.exe'" -ErrorAction SilentlyContinue |
             Where-Object { $_.CommandLine -like "*bot.bot*" })
         if ($already.Count -gt 0) {
