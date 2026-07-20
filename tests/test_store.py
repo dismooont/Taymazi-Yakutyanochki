@@ -349,3 +349,51 @@ def test_legacy_base_is_read_only(tmp_path, holder, make_image):
         store.add_photos([make_image()])
     with pytest.raises(StoreError, match="только для чтения"):
         store.delete_photos([store.list_photos()[0].photo_id])
+
+
+# --------------------------------------------------------------------------
+# Похожие на снимок, уже лежащий в базе
+# --------------------------------------------------------------------------
+
+def test_search_similar_excludes_the_photo_itself(tmp_path, holder, make_image):
+    """
+    Сценарий «прислал фото — покажи похожие». Сам снимок из выдачи исключается:
+    первое место он занял бы всегда, и показывать человеку его же фотографию
+    как «самую похожую» бессмысленно.
+    """
+    store = IndexStore.create_empty(tmp_path / "db")
+    added = store.add_photos([make_image() for _ in range(5)]).added
+    target = added[2]
+
+    hits = store.search_similar(target.photo_id, top_k=3)
+
+    assert len(hits) == 3
+    assert target.photo_id not in [hit.photo_id for hit in hits]
+    scores = [hit.score for hit in hits]
+    assert scores == sorted(scores, reverse=True)
+
+
+def test_search_similar_needs_no_second_encode(tmp_path, holder, make_image):
+    """Вектор берётся из индекса, поэтому энкодер второй раз не запускается."""
+    store = IndexStore.create_empty(tmp_path / "db")
+    added = store.add_photos([make_image() for _ in range(4)]).added
+
+    before = holder.calls["images"]
+    store.search_similar(added[0].photo_id, top_k=2)
+
+    assert holder.calls["images"] == before
+
+
+def test_search_similar_on_single_photo(tmp_path, holder, make_image):
+    """Первый снимок в базе: сравнивать не с чем, и это не ошибка."""
+    store = IndexStore.create_empty(tmp_path / "db")
+    only = store.add_photos([make_image()]).added[0]
+
+    assert store.search_similar(only.photo_id, top_k=5) == []
+
+
+def test_search_similar_unknown_photo(tmp_path, holder, make_image):
+    store = IndexStore.create_empty(tmp_path / "db")
+    store.add_photos([make_image()])
+
+    assert store.search_similar("net-takogo", top_k=5) == []

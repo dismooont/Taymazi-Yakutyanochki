@@ -316,3 +316,30 @@ def test_demo_available_from_any_chat(bot_client, started_chat, demo_ready):
     # чата -100999 не существует, но демо всё равно доступна
     assert bot_client.get("/api/bot/chats/-100999").status_code == 404
     assert bot_client.get("/api/bot/demo").status_code == 200
+
+
+def test_add_photo_returns_id_for_similar_search(bot_client, started_chat):
+    """Бот получает id добавленного снимка, чтобы сразу спросить похожие на него."""
+    added = bot_client.post(
+        f"/api/bot/chats/{CHAT}/photos", files={"file": ("a.jpg", _jpeg((10, 20, 30)), "image/jpeg")}
+    ).json()
+
+    assert added["photo_id"]
+
+    bot_client.post(
+        f"/api/bot/chats/{CHAT}/photos", files={"file": ("b.jpg", _jpeg((200, 30, 40)), "image/jpeg")}
+    )
+
+    similar = bot_client.get(
+        f"/api/bot/chats/{CHAT}/photos/{added['photo_id']}/similar", params={"top_k": 5}
+    ).json()
+
+    assert len(similar["results"]) == 1  # второй снимок, но не сам запрошенный
+    assert similar["results"][0]["photo_id"] != added["photo_id"]
+
+
+def test_similar_for_unknown_photo_is_empty(bot_client, started_chat):
+    response = bot_client.get(f"/api/bot/chats/{CHAT}/photos/deadbeef/similar")
+
+    assert response.status_code == 200
+    assert response.json()["results"] == []

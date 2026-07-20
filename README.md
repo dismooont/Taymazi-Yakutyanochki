@@ -80,12 +80,14 @@ clip_zero_shot_search/
 │   └── requirements.txt            # aiogram, httpx — образ 250 МБ
 ├── src/
 │   └── clip_zero_shot_search.py    # CLI-обёртка над core/ (build / add / text / image)
-├── tests/                          # 162 теста; веса CLIP не загружаются (модель подменяется)
+├── tests/                          # 172 теста; веса CLIP не загружаются (модель подменяется)
 ├── deploy/
 │   └── nginx.conf                  # отдача статики и проксирование /api
 ├── docs/
 │   └── WEB_PLAN.md                 # план веб-версии: архитектура, решения, этапы
 ├── scripts/
+│   ├── run_local.ps1               # запуск без Docker: API + фронтенд + бот (Windows)
+│   ├── run_local.sh                # то же для Linux/macOS
 │   ├── convert_coco_captions.py    # конвертация captions_val2017.json -> captions.csv
 │   ├── eval_recall.py              # метрики Recall@1/5/10 и время ответа (раздел 6.2)
 │   ├── download_coco_val2017.sh    # скачивание датасета val2017 (Linux/macOS/Colab)
@@ -453,16 +455,42 @@ SERVICE_TOKEN=<длинная случайная строка>
 `/setprivacy` → **Disable**. По умолчанию Telegram показывает боту только команды,
 и присланных в группу фотографий он просто не увидит.
 
-Запуск без Docker (два процесса в разных терминалах):
+### 9.0.1. Запуск на своей машине, без Docker
+
+Для демонстрации и разработки это основной способ: **на ноутбуке инференс идёт
+примерно в 15 раз быстрее**, чем в контейнере. Замер на этом проекте — 12 фотографий
+за 5,5 с на хосте против 5 фотографий за 33,8 с в контейнере. Причина не в коде:
+Docker Desktop на Windows и macOS работает через виртуальную машину, и CPU там дороже.
+На линуксовом сервере такого разрыва нет.
+
+```powershell
+# Windows
+.\scripts
+un_local.ps1
+```
+```bash
+# Linux / macOS
+./scripts/run_local.sh
+```
+
+Скрипт поднимает API, фронтенд и (если в `.env` есть токен) Telegram-бота, а перед
+этим проверяет, что не запущены контейнеры: папка `data/` у них общая, и два процесса
+писали бы в одни и те же файлы индекса. Ключи: `-NoBot` — без бота, `-ApiOnly` —
+только API.
+
+Вручную это те же три команды в трёх терминалах:
 
 ```bash
 pip install torch -r requirements-web.txt
-uvicorn web.app:app --port 8000         # API, только один воркер
-
-npm --prefix web-ui install && npm --prefix web-ui run dev   # фронтенд на :5173
-
-python -m bot.bot                        # бот (нужны TELEGRAM_BOT_TOKEN и SERVICE_TOKEN)
+uvicorn web.app:app --port 8000                              # API, только один воркер
+npm --prefix web-ui install && npm --prefix web-ui run dev    # фронтенд на :5173
+python -m bot.bot                                            # бот
 ```
+
+Данные общие с контейнерами, поэтому базу, набранную в Docker, видно и при локальном
+запуске, и наоборот — для демонстрации это удобно. Адрес прокси в `.env` записан
+для Docker (`host.docker.internal`); при запуске на машине бот подставляет `127.0.0.1`
+сам, потому что вне контейнера такого имени не существует.
 
 ### 9.1. Архитектура
 
@@ -567,7 +595,7 @@ TLS не терминируется: поставьте перед nginx certbot
 
 ```bash
 pip install -r requirements-dev.txt
-pytest tests -q                  # 162 теста, около минуты
+pytest tests -q                  # 172 теста, около полутора минут
 ```
 
 Веса CLIP при этом не загружаются: модель подменяется детерминированной заглушкой

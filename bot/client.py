@@ -89,6 +89,12 @@ class SearchApi:
             json={"query": query, "top_k": top_k, "translate": True},
         )
 
+    async def similar(self, chat_id: int, photo_id: str, top_k: int = 5) -> dict:
+        return await self._request(
+            "GET", f"/api/bot/chats/{chat_id}/photos/{photo_id}/similar",
+            params={"top_k": top_k},
+        )
+
     async def photo_bytes(self, chat_id: int, photo_id: str) -> bytes:
         return await self._request("GET", f"/api/bot/chats/{chat_id}/photos/{photo_id}/file")
 

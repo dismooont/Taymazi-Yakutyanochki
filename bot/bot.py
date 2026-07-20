@@ -10,7 +10,7 @@ Telegram-бот: своя база фотографий у каждого чат
   /start в личке   — заводит личную базу (она же видна на сайте после входа
                      через Telegram);
   /start в группе  — заводит базу чата, после чего КАЖДОЕ новое фото индексируется;
-  фото             — попадает в базу того чата, где отправлено;
+  фото             — попадает в базу чата и сразу показывает похожие на него;
   текст в личке    — поиск; в группе — /find, чтобы бот не лез в каждое сообщение;
   /stats           — сколько снимков накопилось.
 
@@ -39,7 +39,7 @@ from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
 from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.filters import Command, CommandObject, CommandStart
-from aiogram.types import BufferedInputFile, Message
+from aiogram.types import BufferedInputFile, InputMediaPhoto, Message
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -79,7 +79,8 @@ def _where(message: Message) -> str:
 
 HELP = (
     "🔎 <b>Поиск по фотографиям</b>\n\n"
-    "Я запоминаю присланные сюда снимки и нахожу их по описанию.\n\n"
+    "Я запоминаю присланные сюда снимки и нахожу их по описанию.\n"
+    "Пришлите фотографию — добавлю её и покажу похожие из этого чата.\n\n"
     "<code>/find рыжий кот на подоконнике</code> — искать в этом чате\n"
     "<code>/demo красный автобус</code> — искать в готовой подборке MS COCO\n"
     "/stats — сколько снимков накопилось\n\n"
@@ -168,11 +169,32 @@ def build_dispatcher(api: SearchApi) -> Dispatcher:
         log.info("фото %s -> добавлено=%s, всего=%s",
                  _where(message), result["added"], result["photos_count"])
 
-        if message.chat.type in PRIVATE:
-            if result["added"]:
-                await message.reply("Добавил в базу.")
-            elif result["skipped"]:
+        # Присланное фото — это ещё и запрос «покажи похожее». Ищем по нему всегда,
+        # в том числе в группе: там ответ нужен не меньше, а команду для картинки
+        # не напишешь. Эмбеддинг заново не считается — API берёт вектор из индекса.
+        photo_id = result.get("photo_id")
+        if not photo_id:
+            if message.chat.type in PRIVATE and result["skipped"]:
                 await message.reply(f"Пропустил: {result['skipped'][0][1]}.")
+            return
+
+        try:
+            similar = await api.similar(message.chat.id, photo_id, TOP_K)
+        except ApiError as e:
+            log.warning("похожие %s -> отказ: %s", _where(message), e.detail)
+            if message.chat.type in PRIVATE:
+                await message.reply("Добавил в базу.")
+            return
+
+        hits = similar["results"]
+        log.info("похожие %s -> найдено %s", _where(message), len(hits))
+        if not hits:
+            # первое фото в базе: сравнивать не с чем, и это не ошибка
+            await message.reply("Добавил в базу. Пока это единственный снимок — сравнить не с чем.")
+            return
+
+        await message.reply(f"Добавил в базу. Похожие ({len(hits)}):")
+        await _send_album(message, hits, lambda pid: api.photo_bytes(message.chat.id, pid))
 
     @dispatcher.message(Command("find"))
     async def on_find(message: Message, command: CommandObject) -> None:
@@ -257,17 +279,56 @@ def build_dispatcher(api: SearchApi) -> Dispatcher:
         note = f"«{query}» → <code>{used}</code>" if used != query else f"«{query}»"
         where = " в демо-базе" if source == "демо" else ""
         await message.answer(f"{note}\nНашёл {len(hits)}{where}:")
-        for hit in hits:
+        await _send_album(message, hits, fetch)
+
+    async def _send_album(message: Message, hits: list, fetch) -> None:
+        """
+        Отправляет найденное одним альбомом, а не отдельными сообщениями: пять
+        картинок подряд забивают весь экран, а альбом Telegram показывает сеткой.
+        Близость подписана у каждой — она разная у разных мест выдачи.
+        """
+        media, missing = [], 0
+        for place, hit in enumerate(hits, start=1):
             try:
                 data = await fetch(hit["photo_id"])
             except ApiError:
+                missing += 1
                 continue
-            await message.answer_photo(
-                BufferedInputFile(data, filename=f"{hit['photo_id']}.jpg"),
-                caption=f"близость {hit['score']:.3f}",
-            )
+            media.append(InputMediaPhoto(
+                media=BufferedInputFile(data, filename=f"{hit['photo_id']}.jpg"),
+                caption=f"{place}. близость {hit['score']:.3f}",
+            ))
+
+        if not media:
+            await message.answer("Файлы найденных снимков недоступны.")
+            return
+        if len(media) == 1:
+            # альбом из одного элемента Telegram не принимает
+            await message.answer_photo(media[0].media, caption=media[0].caption)
+        else:
+            await message.answer_media_group(media)
+        if missing:
+            await message.answer(f"Ещё {missing} снимков не удалось прочитать с диска.")
 
     return dispatcher
+
+
+def _proxy_for_this_host() -> str:
+    """
+    Адрес прокси, пригодный для того места, где бот действительно запущен.
+
+    В .env он обычно записан для Docker — host.docker.internal. Вне контейнера
+    такого имени не существует, и бот молча не достучался бы до Telegram. Один
+    и тот же .env должен работать в обоих режимах, поэтому при запуске на машине
+    подставляем localhost.
+    """
+    proxy = os.environ.get("TELEGRAM_PROXY", "").strip()
+    in_docker = Path("/.dockerenv").exists()
+    if proxy and not in_docker and "host.docker.internal" in proxy:
+        local = proxy.replace("host.docker.internal", "127.0.0.1")
+        log.info("Запуск вне Docker: прокси %s -> %s", proxy, local)
+        return local
+    return proxy
 
 
 async def main() -> None:
@@ -281,7 +342,7 @@ async def main() -> None:
     api_url = os.environ.get("API_URL", "http://127.0.0.1:8000")
     api = SearchApi(api_url, service_token)
 
-    proxy = os.environ.get("TELEGRAM_PROXY", "").strip()
+    proxy = _proxy_for_this_host()
     bot = Bot(
         token=token,
         session=AiohttpSession(proxy=proxy) if proxy else None,

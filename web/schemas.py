@@ -178,11 +178,13 @@ class BotChatOut(BaseModel):
     total_bytes: int
     created: bool = False
     added: int = 0
+    # id только что добавленного снимка: по нему бот сразу просит похожие
+    photo_id: str | None = None
     skipped: list[tuple[str, str]] = Field(default_factory=list)
 
     @classmethod
     def from_row(cls, row: dict, *, created: bool = False, added: int = 0,
-                 skipped: list | None = None) -> "BotChatOut":
+                 photo_id: str | None = None, skipped: list | None = None) -> "BotChatOut":
         return cls(
             database_id=row["id"],
             name=row["name"],
@@ -190,6 +192,7 @@ class BotChatOut(BaseModel):
             total_bytes=row["photos_bytes"] + row["index_bytes"],
             created=created,
             added=added,
+            photo_id=photo_id,
             skipped=skipped or [],
         )
 

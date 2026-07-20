@@ -545,6 +545,30 @@ class IndexStore:
         emb = holder.encode_texts([used_query])
         return used_query, self._search(self._index, emb, top_k, self._hit_from_photo)
 
+    def search_similar(self, photo_id: str, top_k: int = 5) -> list[SearchHit]:
+        """
+        Похожие на снимок, который уже лежит в базе.
+
+        Эмбеддинг заново не считается: вектор снимка уже есть в индексе, и
+        reconstruct достаёт его обратно. Для сценария «прислал фото — покажи
+        похожие» это убирает второй прогон энкодера, то есть примерно половину
+        всей работы.
+
+        Сам снимок из выдачи исключается: показывать человеку его же фотографию
+        как «самую похожую» бессмысленно, а первое место она займёт всегда.
+        """
+        with self._lock:
+            row = self._by_id.get(photo_id)
+            if row is None or self._index.ntotal == 0:
+                return []
+            vector = np.ascontiguousarray(
+                self._index.reconstruct(row).reshape(1, -1), dtype="float32"
+            )
+
+        # берём на один больше, чтобы после выброса самого снимка осталось top_k
+        hits = self._search(self._index, vector, top_k + 1, self._hit_from_photo)
+        return [hit for hit in hits if hit.photo_id != photo_id][:top_k]
+
     def search_image(
         self,
         image: Image.Image | str | Path,

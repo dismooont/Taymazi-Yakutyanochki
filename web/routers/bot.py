@@ -130,7 +130,9 @@ def add_photo(
 
     outcome = services.add_photo_paths(database, [target], staging, {name: name})
     fresh = db.get_database(database["id"])
-    return BotChatOut.from_row(fresh, added=outcome["added"], skipped=outcome["skipped"])
+    return BotChatOut.from_row(
+        fresh, added=outcome["added"], photo_id=outcome["photo_id"], skipped=outcome["skipped"]
+    )
 
 
 @router.post("/chats/{chat_id}/search", response_model=BotSearchResultOut)
@@ -142,6 +144,30 @@ def search_chat(chat_id: str, payload: BotSearchRequest, _: ServiceAuth) -> BotS
     )
     return BotSearchResultOut(
         used_query=used_query,
+        results=[
+            SearchHitOut(
+                photo_id=hit.photo_id,
+                score=round(hit.score, 4),
+                thumb_url=f"/api/bot/chats/{chat_id}/photos/{hit.photo_id}/file",
+                file_url=f"/api/bot/chats/{chat_id}/photos/{hit.photo_id}/file",
+            )
+            for hit in hits
+        ],
+    )
+
+
+@router.get("/chats/{chat_id}/photos/{photo_id}/similar", response_model=BotSearchResultOut)
+def similar_photos(chat_id: str, photo_id: str, _: ServiceAuth, top_k: int = 5) -> BotSearchResultOut:
+    """
+    Похожие на снимок, уже лежащий в базе. Именно так работает сценарий
+    «прислал фото — покажи похожие»: эмбеддинг не считается заново, вектор
+    берётся из индекса.
+    """
+    database = _chat_database(chat_id)
+    store = store_for(database)
+    hits = store.search_similar(photo_id, top_k=max(1, min(top_k, 20)))
+    return BotSearchResultOut(
+        used_query="",
         results=[
             SearchHitOut(
                 photo_id=hit.photo_id,
