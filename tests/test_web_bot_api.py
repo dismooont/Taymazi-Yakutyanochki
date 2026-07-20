@@ -37,6 +37,38 @@ def bot_client(raw_client, app_env):
 
 
 @pytest.fixture
+def demo_ready(bot_client, app_env, tmp_path, holder):
+    """Подключает демо-базу так же, как это делает приложение при старте."""
+    import json
+
+    import faiss
+    import numpy as np
+
+    index_dir = tmp_path / "demo-for-bot"
+    index_dir.mkdir()
+    photo = tmp_path / "coco.jpg"
+    photo.write_bytes(_jpeg((30, 60, 90)))
+
+    vectors = np.ascontiguousarray(
+        np.array([[1.0] + [0.0] * (holder.dim - 1)], dtype="float32")
+    )
+    index = faiss.IndexFlatIP(holder.dim)
+    index.add(vectors)
+    faiss.write_index(index, str(index_dir / "images.index"))
+    (index_dir / "images_meta.json").write_text(
+        json.dumps([{"image_id": "139", "path": str(photo)}]), encoding="utf-8"
+    )
+
+    app_env.setenv("DEMO_INDEX_DIR", str(index_dir))
+    reset_settings()
+
+    from web.app import _register_demo_database
+
+    _register_demo_database()
+    return db.get_demo_database()
+
+
+@pytest.fixture
 def started_chat(bot_client):
     response = bot_client.post(
         f"/api/bot/chats/{CHAT}/start",
@@ -235,3 +267,52 @@ def test_photos_from_bot_visible_on_site(bot_client, started_chat, client, app_e
         json={"query": "cat", "translate": False},
     ).json()
     assert len(found["results"]) == 1
+
+
+# --------------------------------------------------------------------------
+# Демо-база через бота
+# --------------------------------------------------------------------------
+
+def test_demo_absent_until_registered(bot_client):
+    """Пока демо-база не подключена, бот получает честный 404, а не пустую выдачу."""
+    assert bot_client.get("/api/bot/demo").status_code == 404
+    assert bot_client.post(
+        "/api/bot/demo/search", json={"query": "cat", "translate": False}
+    ).status_code == 404
+
+
+def test_demo_search_and_photo(bot_client, demo_ready):
+    info = bot_client.get("/api/bot/demo").json()
+    assert info["photos_count"] == 1
+
+    found = bot_client.post(
+        "/api/bot/demo/search", json={"query": "cat", "top_k": 3, "translate": False}
+    ).json()
+
+    assert len(found["results"]) == 1
+    photo_id = found["results"][0]["photo_id"]
+    assert found["results"][0]["file_url"] == f"/api/bot/demo/photos/{photo_id}/file"
+
+    photo = bot_client.get(f"/api/bot/demo/photos/{photo_id}/file")
+    assert photo.status_code == 200
+    assert len(photo.content) > 0
+
+
+def test_demo_needs_service_token(raw_client, demo_ready):
+    """Демо-база открыта на чтение всем вошедшим на сайт, но не всему интернету."""
+    # фикстура demo_ready проставила заголовок на этот же клиент — снимаем его,
+    # чтобы проверить именно отсутствие токена
+    raw_client.headers.pop("X-Service-Token", None)
+
+    assert raw_client.get("/api/bot/demo").status_code == 401
+
+
+def test_demo_available_from_any_chat(bot_client, started_chat, demo_ready):
+    """Демо не привязана к чату: она общая, /start для неё не нужен."""
+    from_known = bot_client.post(
+        "/api/bot/demo/search", json={"query": "cat", "translate": False}
+    )
+    assert from_known.status_code == 200
+    # чата -100999 не существует, но демо всё равно доступна
+    assert bot_client.get("/api/bot/chats/-100999").status_code == 404
+    assert bot_client.get("/api/bot/demo").status_code == 200

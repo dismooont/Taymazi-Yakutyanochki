@@ -78,11 +78,13 @@ def _where(message: Message) -> str:
 
 
 HELP = (
-    "🔎 <b>Поиск по фотографиям чата</b>\n\n"
+    "🔎 <b>Поиск по фотографиям</b>\n\n"
     "Я запоминаю присланные сюда снимки и нахожу их по описанию.\n\n"
-    "<code>/find рыжий кот на подоконнике</code> — найти\n"
-    "/stats — сколько накопилось\n\n"
-    "В личке можно просто написать, что искать, без команды."
+    "<code>/find рыжий кот на подоконнике</code> — искать в этом чате\n"
+    "<code>/demo красный автобус</code> — искать в готовой подборке MS COCO\n"
+    "/stats — сколько снимков накопилось\n\n"
+    "В личке можно просто написать, что искать, без команды.\n"
+    "Запрос можно писать по-русски — я переведу его сам."
 )
 
 
@@ -185,24 +187,66 @@ def build_dispatcher(api: SearchApi) -> Dispatcher:
         """В личке любое сообщение — запрос: команда /find тут была бы лишней."""
         await _answer(message, message.text.strip())
 
+    @dispatcher.message(Command("demo"))
+    async def on_demo(message: Message, command: CommandObject) -> None:
+        """
+        Поиск по общей демо-базе MS COCO — 5022 размеченных снимка.
+
+        Команда одноразовая, а не переключатель режима: с режимом человек рано или
+        поздно забудет, где находится, и удивится, почему поиск отвечает чужими
+        фотографиями.
+        """
+        demo = await api.demo_info()
+        if demo is None:
+            await message.answer("Демо-база не подключена на этом сервере.")
+            return
+
+        query = (command.args or "").strip()
+        if not query:
+            await message.answer(
+                f"Демо-база: {demo['photos_count']} фотографий MS COCO.\n"
+                f"Что найти? Например: <code>/demo красный автобус</code>"
+            )
+            return
+
+        await _search_and_send(
+            message, query,
+            search=lambda: api.search_demo(query, TOP_K),
+            fetch=api.demo_photo_bytes,
+            source="демо",
+        )
+
     async def _answer(message: Message, query: str) -> None:
         chat = await api.chat_info(message.chat.id)
         if chat is None:
             await message.answer("Здесь ещё нет базы. Начните с /start.")
             return
         if chat["photos_count"] == 0:
-            await message.answer("В базе пока нет фотографий — пришлите несколько.")
+            await message.answer(
+                "В базе пока нет фотографий — пришлите несколько.\n"
+                "Или посмотрите, как это работает, на готовой подборке: "
+                "<code>/demo красный автобус</code>"
+            )
             return
 
+        await _search_and_send(
+            message, query,
+            search=lambda: api.search(message.chat.id, query, TOP_K),
+            fetch=lambda photo_id: api.photo_bytes(message.chat.id, photo_id),
+            source="чат",
+        )
+
+    async def _search_and_send(message: Message, query: str, search, fetch, source: str) -> None:
+        """Общая часть для поиска по базе чата и по демо-базе: запрос, выдача, отправка."""
         try:
-            found = await api.search(message.chat.id, query, TOP_K)
+            found = await search()
         except ApiError as e:
-            log.warning("поиск %s -> отказ: %s", _where(message), e.detail)
+            log.warning("поиск(%s) %s -> отказ: %s", source, _where(message), e.detail)
             await message.answer(f"Поиск не удался: {e.detail}")
             return
         # длину запроса пишем, сам запрос — нет: это личные данные
-        log.info("поиск %s -> %s символов, найдено %s",
-                 _where(message), len(query), len(found["results"]))
+        log.info("поиск(%s) %s -> %s символов, найдено %s",
+                 source, _where(message), len(query), len(found["results"]))
 
         hits = found["results"]
         if not hits:
@@ -211,10 +255,11 @@ def build_dispatcher(api: SearchApi) -> Dispatcher:
 
         used = found["used_query"]
         note = f"«{query}» → <code>{used}</code>" if used != query else f"«{query}»"
-        await message.answer(f"{note}\nНашёл {len(hits)}:")
+        where = " в демо-базе" if source == "демо" else ""
+        await message.answer(f"{note}\nНашёл {len(hits)}{where}:")
         for hit in hits:
             try:
-                data = await api.photo_bytes(message.chat.id, hit["photo_id"])
+                data = await fetch(hit["photo_id"])
             except ApiError:
                 continue
             await message.answer_photo(

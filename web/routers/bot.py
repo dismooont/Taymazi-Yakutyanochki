@@ -159,3 +159,49 @@ def photo_file(chat_id: str, photo_id: str, _: ServiceAuth) -> FileResponse:
     """Бот забирает найденный снимок, чтобы отправить его в чат."""
     database = _chat_database(chat_id)
     return FileResponse(resolve_photo_file(database, photo_id, thumb=False))
+
+
+# --------------------------------------------------------------------------
+# Демо-база
+# --------------------------------------------------------------------------
+
+def _demo_database() -> dict[str, Any]:
+    """
+    Общая база MS COCO. Доступна из любого чата и только на чтение, поэтому
+    ни владения, ни участия здесь не проверяется — проверять нечего.
+    """
+    database = db.get_demo_database()
+    if database is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Демо-база не подключена")
+    return database
+
+
+@router.get("/demo", response_model=BotChatOut)
+def demo_info(_: ServiceAuth) -> BotChatOut:
+    return BotChatOut.from_row(_demo_database())
+
+
+@router.post("/demo/search", response_model=BotSearchResultOut)
+def search_demo(payload: BotSearchRequest, _: ServiceAuth) -> BotSearchResultOut:
+    database = _demo_database()
+    store = store_for(database)
+    used_query, hits = store.search_text(
+        payload.query.strip(), top_k=payload.top_k, translate=payload.translate
+    )
+    return BotSearchResultOut(
+        used_query=used_query,
+        results=[
+            SearchHitOut(
+                photo_id=hit.photo_id,
+                score=round(hit.score, 4),
+                thumb_url=f"/api/bot/demo/photos/{hit.photo_id}/file",
+                file_url=f"/api/bot/demo/photos/{hit.photo_id}/file",
+            )
+            for hit in hits
+        ],
+    )
+
+
+@router.get("/demo/photos/{photo_id}/file")
+def demo_photo_file(photo_id: str, _: ServiceAuth) -> FileResponse:
+    return FileResponse(resolve_photo_file(_demo_database(), photo_id, thumb=False))
