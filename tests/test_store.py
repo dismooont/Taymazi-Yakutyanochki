@@ -39,7 +39,9 @@ def test_create_empty(tmp_path, holder):
     assert (tmp_path / "db" / IMAGES_META).exists()
 
     meta = json.loads((tmp_path / "db" / IMAGES_META).read_text(encoding="utf-8"))
-    assert meta["version"] == META_VERSION
+    # Пока подписей нет, meta пишется в версии 2 — чтобы базу открывал и код,
+    # собранный до появления подписей. Подробности в test_store_captions.py.
+    assert meta["version"] == 2
     assert meta["photos"] == []
 
 

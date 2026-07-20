@@ -9,9 +9,11 @@ IndexStore — одна база фотографий: FAISS-индекс + фа
 Раскладка папки базы:
     <root>/
         images.index          FAISS IndexFlatIP по эмбеддингам картинок
-        images_meta.json      {"version": 2, "photos": [...]} — порядок = порядок векторов
-        captions.index        опционально: эмбеддинги подписей (есть только у COCO-базы)
+        images_meta.json      {"version": 3, "photos": [...]} — порядок = порядок векторов
+        captions.index        опционально: подписи в пространстве CLIP (есть у COCO-базы)
         captions_meta.json
+        captions_sbert.index  опционально: те же подписи в пространстве текстовой модели
+        captions_sbert.json   {"version": 1, "model": "...", "rows": [photo_id, ...]}
         translate_cache.json
         photos/               оригиналы, имя файла = <photo_id><ext>
         thumbs/               превью 320px WebP
@@ -19,6 +21,15 @@ IndexStore — одна база фотографий: FAISS-индекс + фа
 Инвариант, на котором держится всё остальное: i-я запись в images_meta.json описывает
 i-й вектор в images.index. Любая операция, меняющая одно, обязана менять и второе — под
 локом и с атомарной записью на диск.
+
+Для captions_sbert.index этот инвариант намеренно НЕ действует. Подписи появляются
+позже фотографий и покрывают базу частично: пока генератор не дошёл до снимка,
+подписи у него нет. Позиционное соответствие здесь развалилось бы на первом же
+удалении снимка без подписи, поэтому строки индекса подписей адресуются не номером,
+а собственным списком photo_id в captions_sbert.json.
+
+Индекс подписей вторичен: если он повреждён или отстал от базы, поиск по подписям
+выключается, но сама база продолжает открываться и работать.
 """
 
 from __future__ import annotations
@@ -45,10 +56,17 @@ IMAGES_INDEX = "images.index"
 IMAGES_META = "images_meta.json"
 CAPTIONS_INDEX = "captions.index"
 CAPTIONS_META = "captions_meta.json"
+CAPTIONS_SBERT_INDEX = "captions_sbert.index"
+CAPTIONS_SBERT_META = "captions_sbert.json"
 PHOTOS_DIR = "photos"
 THUMBS_DIR = "thumbs"
 
-META_VERSION = 2
+META_VERSION = 3
+# v2 отличается от v3 только отсутствием подписи у снимка, а недостающие поля
+# закрыты значениями по умолчанию — поэтому старые базы читаются как есть, без
+# миграции и без перестроения индекса.
+SUPPORTED_META_VERSIONS = (2, 3)
+CAPTIONS_SBERT_VERSION = 1
 ALLOWED_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
 THUMB_SIZE = 320
 # Индекс сбрасывается на диск не после каждого батча: write_index на 5000 векторов — это
@@ -68,14 +86,24 @@ class Photo:
     filename: str
     bytes: int = 0
     added_at: str = ""
+    caption: str = ""
+    caption_model: str = ""  # чем сгенерирована — чтобы уметь перегенерировать
 
     def to_dict(self) -> dict:
-        return {
+        data = {
             "photo_id": self.photo_id,
             "filename": self.filename,
             "bytes": self.bytes,
             "added_at": self.added_at,
         }
+        # У базы без подписей meta остаётся ровно такой же, как была в v2: пустые
+        # поля в каждой из пяти тысяч записей — это лишние сотни килобайт и шум
+        # в диффе на ровном месте.
+        if self.caption:
+            data["caption"] = self.caption
+        if self.caption_model:
+            data["caption_model"] = self.caption_model
+        return data
 
 
 @dataclass
@@ -109,6 +137,7 @@ class Stats:
     photos_bytes: int
     index_bytes: int
     has_captions: bool
+    captions_count: int = 0  # сколько снимков уже с подписью (покрытие неполное)
 
 
 class StoreError(RuntimeError):
@@ -177,6 +206,10 @@ class IndexStore:
         self._captions_index = None
         self._captions_meta: list[dict] = []
         self._captions_loaded = False
+        self._sbert_index = None
+        self._sbert_rows: list[str] = []  # строка индекса -> photo_id
+        self._sbert_model = ""
+        self._sbert_loaded = False
         self._by_id = {p.photo_id: i for i, p in enumerate(photos)}
 
     # ------------------------------------------------------------------
@@ -232,12 +265,13 @@ class IndexStore:
     @staticmethod
     def _parse_meta(raw) -> tuple[list[Photo], bool]:
         """
-        Читает оба формата meta:
-          v2 (новый):  {"version": 2, "photos": [{"photo_id","filename","bytes","added_at"}]}
-          legacy:      [{"image_id": "...", "path": "data/images/..."}]
+        Читает все три формата meta:
+          v3 (текущий): к полям v2 добавлены "caption" и "caption_model"
+          v2:           {"version": 2, "photos": [{"photo_id","filename","bytes","added_at"}]}
+          legacy:       [{"image_id": "...", "path": "data/images/..."}]
         Legacy-формат нужен, чтобы веб мог открыть уже построенную базу COCO из index/.
         """
-        if isinstance(raw, dict) and raw.get("version") == META_VERSION:
+        if isinstance(raw, dict) and raw.get("version") in SUPPORTED_META_VERSIONS:
             return [Photo(**item) for item in raw["photos"]], False
 
         if isinstance(raw, list):
@@ -303,7 +337,8 @@ class IndexStore:
     def stats(self) -> Stats:
         index_bytes = sum(
             (self.root / name).stat().st_size
-            for name in (IMAGES_INDEX, IMAGES_META, CAPTIONS_INDEX, CAPTIONS_META)
+            for name in (IMAGES_INDEX, IMAGES_META, CAPTIONS_INDEX, CAPTIONS_META,
+                         CAPTIONS_SBERT_INDEX, CAPTIONS_SBERT_META)
             if (self.root / name).exists()
         )
         if self._legacy:
@@ -321,6 +356,7 @@ class IndexStore:
             photos_bytes=photos_bytes,
             index_bytes=index_bytes,
             has_captions=self._load_captions() is not None,
+            captions_count=sum(1 for p in self._photos if p.caption),
         )
 
     def iter_export_files(self) -> Iterator[tuple[str, Path]]:
@@ -490,6 +526,7 @@ class IndexStore:
             self._by_id = {p.photo_id: i for i, p in enumerate(self._photos)}
 
             self._drop_captions_of(targets)
+            self._drop_caption_vectors_of(targets)
             self._persist()
 
             # файлы удаляем после успешной записи индекса: если процесс упадёт раньше,
@@ -527,6 +564,196 @@ class IndexStore:
         self._captions_meta = [self._captions_meta[i] for i in keep_rows]
         _atomic_write_index(self.root / CAPTIONS_INDEX, self._captions_index)
         _atomic_write_json(self.root / CAPTIONS_META, self._captions_meta)
+
+    # ------------------------------------------------------------------
+    # Подписи
+    # ------------------------------------------------------------------
+    #
+    # Разделены намеренно: текст пишет генератор подписей (BLIP), векторы —
+    # текстовая модель (SBERT). Core не знает ни о том, ни о другом и принимает
+    # готовые значения, поэтому ни веб, ни бот не тянут лишних зависимостей.
+
+    def set_caption_texts(self, captions: dict[str, str], *, model: str = "") -> int:
+        """
+        Проставляет подписи снимкам. Неизвестные photo_id молча пропускаются:
+        генератор работает в фоне, и снимок мог быть удалён, пока его подпись
+        считалась, — это штатный ход событий, а не ошибка.
+        """
+        with self._lock:
+            if self._legacy:
+                raise StoreError("Legacy-база открыта только для чтения")
+            changed = 0
+            for photo_id, caption in captions.items():
+                row = self._by_id.get(photo_id)
+                if row is None:
+                    continue
+                self._photos[row].caption = caption
+                self._photos[row].caption_model = model
+                changed += 1
+            if changed:
+                self._persist()
+            return changed
+
+    def caption_of(self, photo_id: str) -> str:
+        photo = self.get_photo(photo_id)
+        return photo.caption if photo else ""
+
+    def photos_without_caption(self, limit: int | None = None) -> list[Photo]:
+        """Очередь работы для генератора подписей."""
+        pending = [p for p in self._photos if not p.caption]
+        return pending if limit is None else pending[:limit]
+
+    def captions_coverage(self) -> tuple[int, int]:
+        """(снимков с подписью, всего снимков)."""
+        return sum(1 for p in self._photos if p.caption), len(self._photos)
+
+    def set_caption_vectors(
+        self, vectors: dict[str, np.ndarray], *, model: str = ""
+    ) -> int:
+        """
+        Добавляет или заменяет векторы подписей. Индекс собирается заново из
+        объединения старых и новых строк: IndexFlatIP не умеет заменять вектор на
+        месте, а размер здесь мал (одна строка на снимок, а не пять, как у COCO).
+
+        Смена модели распознаётся по размерности: векторы другой длины означают
+        другой энкодер, и старые строки в таком случае выбрасываются — смешивать
+        два пространства в одном индексе нельзя, оценки были бы бессмысленны.
+        """
+        with self._lock:
+            if self._legacy:
+                raise StoreError("Legacy-база открыта только для чтения")
+
+            fresh = {
+                photo_id: np.asarray(vector, dtype="float32").reshape(-1)
+                for photo_id, vector in vectors.items()
+                if photo_id in self._by_id
+            }
+            if not fresh:
+                return 0
+
+            dims = {vector.shape[0] for vector in fresh.values()}
+            if len(dims) != 1:
+                raise StoreError(f"Векторы подписей разной размерности: {sorted(dims)}")
+            dim = dims.pop()
+
+            merged: dict[str, np.ndarray] = {}
+            self._load_caption_vectors()
+            if self._sbert_index is not None and self._sbert_index.d == dim:
+                stored = self._sbert_index.reconstruct_n(0, self._sbert_index.ntotal)
+                for row, photo_id in enumerate(self._sbert_rows):
+                    if photo_id in self._by_id:
+                        merged[photo_id] = stored[row]
+            merged.update(fresh)
+
+            index = faiss.IndexFlatIP(dim)
+            rows = list(merged.keys())
+            index.add(np.ascontiguousarray([merged[pid] for pid in rows], dtype="float32"))
+
+            self._sbert_index = index
+            self._sbert_rows = rows
+            self._sbert_model = model or self._sbert_model
+            self._sbert_loaded = True
+            self._persist_caption_vectors()
+            return len(fresh)
+
+    def search_captions(self, query_vector: np.ndarray, top_k: int = 5) -> list[CaptionHit]:
+        """
+        Поиск по подписям. Вектор запроса приходит готовым — кодирует его тот, кто
+        владеет текстовой моделью.
+
+        Строки, чьи снимки уже удалены, пропускаются: индекс подписей вторичен и
+        может отставать от базы, и это не повод отдавать наружу ссылки в никуда.
+        """
+        self._load_caption_vectors()
+        if self._sbert_index is None:
+            return []
+        emb = np.ascontiguousarray(
+            np.asarray(query_vector, dtype="float32").reshape(1, -1)
+        )
+        if emb.shape[1] != self._sbert_index.d:
+            raise StoreError(
+                f"Размерность запроса {emb.shape[1]} не совпадает с индексом "
+                f"подписей {self._sbert_index.d} — модель сменилась?"
+            )
+
+        hits: list[CaptionHit] = []
+        for row, score in self._search(self._sbert_index, emb, top_k, lambda r, s: (r, s)):
+            photo_id = self._sbert_rows[row]
+            photo = self.get_photo(photo_id)
+            if photo is None:
+                continue
+            hits.append(CaptionHit(photo_id=photo_id, score=score, caption=photo.caption))
+        return hits
+
+    def caption_index_model(self) -> str:
+        self._load_caption_vectors()
+        return self._sbert_model
+
+    def _load_caption_vectors(self):
+        """
+        Лениво читает индекс подписей. Расхождение числа векторов с собственным
+        списком строк означает, что индекс испорчен, — тогда поиск по подписям
+        просто выключается. Ронять базу целиком из-за вторичного индекса нельзя:
+        снимки и поиск по ним от этого не страдают.
+        """
+        if self._sbert_loaded:
+            return self._sbert_index
+        self._sbert_loaded = True
+
+        index_path = self.root / CAPTIONS_SBERT_INDEX
+        meta_path = self.root / CAPTIONS_SBERT_META
+        if not (index_path.exists() and meta_path.exists()):
+            return None
+        try:
+            index = faiss.read_index(str(index_path))
+            with open(meta_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            rows = list(meta["rows"])
+        except (OSError, ValueError, KeyError, RuntimeError) as e:
+            print(f"[индекс подписей не прочитан] {self.root}: {e}")
+            return None
+
+        if index.ntotal != len(rows):
+            print(
+                f"[индекс подписей рассогласован] {self.root}: {index.ntotal} векторов "
+                f"против {len(rows)} строк — поиск по подписям выключен"
+            )
+            return None
+
+        self._sbert_index = index
+        self._sbert_rows = rows
+        self._sbert_model = meta.get("model", "")
+        return self._sbert_index
+
+    def _persist_caption_vectors(self) -> None:
+        _atomic_write_index(self.root / CAPTIONS_SBERT_INDEX, self._sbert_index)
+        _atomic_write_json(
+            self.root / CAPTIONS_SBERT_META,
+            {
+                "version": CAPTIONS_SBERT_VERSION,
+                "model": self._sbert_model,
+                "rows": self._sbert_rows,
+            },
+        )
+
+    def _drop_caption_vectors_of(self, photo_ids: set[str]) -> None:
+        """
+        Выбрасывает векторы удалённых снимков.
+
+        Здесь и видно, зачем индексу подписей собственный список photo_id: удаляют
+        обычно снимок, у которого подписи ещё нет, и при позиционной адресации все
+        последующие строки уехали бы на единицу, тихо переклеив подписи на чужие
+        фотографии.
+        """
+        if self._load_caption_vectors() is None:
+            return
+        keep = [row for row, photo_id in enumerate(self._sbert_rows)
+                if photo_id not in photo_ids]
+        if len(keep) == len(self._sbert_rows):
+            return
+        self._sbert_index = self._rebuild_index(self._sbert_index, keep)
+        self._sbert_rows = [self._sbert_rows[row] for row in keep]
+        self._persist_caption_vectors()
 
     # ------------------------------------------------------------------
     # Поиск
@@ -622,12 +849,21 @@ class IndexStore:
     # ------------------------------------------------------------------
 
     def _persist(self) -> None:
-        """Атомарная запись индекса и meta: сначала .tmp, затем os.replace."""
+        """
+        Атомарная запись индекса и meta: сначала .tmp, затем os.replace.
+
+        Версия проставляется по факту: пока в базе нет ни одной подписи, файл
+        остаётся ровно таким же, как писала предыдущая версия кода. Это не
+        косметика — данные общие между локальным запуском и контейнерами, и
+        собранный ранее образ на meta v3 просто не откроет базу. Так окно
+        несовместимости появляется только у тех баз, где подписи и правда есть.
+        """
         self.root.mkdir(parents=True, exist_ok=True)
+        version = META_VERSION if any(p.caption for p in self._photos) else 2
         _atomic_write_index(self.root / IMAGES_INDEX, self._index)
         _atomic_write_json(
             self.root / IMAGES_META,
-            {"version": META_VERSION, "photos": [p.to_dict() for p in self._photos]},
+            {"version": version, "photos": [p.to_dict() for p in self._photos]},
         )
 
     def _load_captions(self):
