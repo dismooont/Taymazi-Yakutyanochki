@@ -34,6 +34,16 @@ RUN python -c "from transformers import CLIPModel, CLIPProcessor; \
     CLIPModel.from_pretrained('openai/clip-vit-base-patch32'); \
     CLIPProcessor.from_pretrained('openai/clip-vit-base-patch32')"
 
+# Веса для поиска и генерации подписей (C4) — тем же приёмом и по той же причине,
+# что и CLIP: контейнер работает с HF_HUB_OFFLINE=1, докачать на рантайме нельзя,
+# значит запекаем при сборке. BLIP ~944 МБ, SBERT ~90 МБ: образ тяжелеет примерно
+# на гигабайт. Отдельным слоем ПОСЛЕ CLIP и ДО COPY — тот же расчёт на кэш.
+RUN python -c "from transformers import BlipForConditionalGeneration, BlipProcessor; \
+    BlipForConditionalGeneration.from_pretrained('Salesforce/blip-image-captioning-base'); \
+    BlipProcessor.from_pretrained('Salesforce/blip-image-captioning-base')" && \
+    python -c "from sentence_transformers import SentenceTransformer; \
+    SentenceTransformer('sentence-transformers/all-MiniLM-L6-v2')"
+
 COPY core/ core/
 COPY web/ web/
 

@@ -27,3 +27,9 @@ pillow>=10.0
 numpy>=1.24
 tqdm>=4.65
 deep-translator>=1.11      # перевод текстовых запросов RU->EN
+
+# --- поиск и генерация подписей (фаза C4) ---
+# Текстовая модель для поиска по подписям. BLIP отдельной строкой не нужен: он
+# внутри transformers. Веса обеих моделей запекаются в образ (Dockerfile.web),
+# сама разметка включается флагом CAPTION_AUTO_ENABLED (docker-compose.yml).
+sentence-transformers>=3.0
