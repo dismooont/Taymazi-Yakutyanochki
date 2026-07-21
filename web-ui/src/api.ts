@@ -44,6 +44,9 @@ export interface Photo {
   bytes: number
   added_at: string
   caption: string
+  liked: boolean
+  favorited: boolean
+  ai_generated: boolean
 }
 
 export interface PhotoPage {
@@ -61,10 +64,16 @@ export interface CaptionResult {
 
 export interface SearchHit {
   photo_id: string
+  /** нужен ленте — она собирает снимки сразу из нескольких баз */
+  database_id: string | null
   score: number
   thumb_url: string
   file_url: string
   caption: string
+  liked: boolean
+  favorited: boolean
+  /** снимок сгенерирован YandexART, а не найден в базе (поиск ничего не нашёл) */
+  ai_generated: boolean
 }
 
 export interface CaptionHit {
@@ -106,6 +115,22 @@ export interface Quota {
   bytes_used: number
   bytes_limit: number
   photos_per_database_limit: number
+}
+
+export interface ProfilePhoto {
+  database_id: string
+  database_name: string
+  database_kind: 'personal' | 'chat' | 'demo'
+  photo_id: string
+  marked_at: string
+  thumb_url: string
+  file_url: string
+}
+
+export interface Profile {
+  user: User
+  liked: ProfilePhoto[]
+  favorited: ProfilePhoto[]
 }
 
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
@@ -189,6 +214,9 @@ export const api = {
   searchText: (id: string, query: string, top_k = 12, translate = true) =>
     json<SearchResult>(`/databases/${id}/search/text`, 'POST', { query, top_k, translate }),
 
+  generate: (id: string, query: string) =>
+    json<SearchResult>(`/databases/${id}/search/generate`, 'POST', { query }),
+
   searchImage: (id: string, file: File, top_k = 12) => {
     const form = new FormData()
     form.append('file', file)
@@ -198,9 +226,27 @@ export const api = {
     })
   },
 
+  similar: (id: string, photoId: string, top_k = 12) =>
+    request<SearchResult>(`/databases/${id}/search/similar/${photoId}?top_k=${top_k}`),
+
+  viewPhoto: (id: string, photoId: string) =>
+    request<void>(`/databases/${id}/photos/${photoId}/view`, { method: 'POST' }),
+
+  feed: () => request<SearchResult>('/feed'),
+
   job: (jobId: string) => request<Job>(`/jobs/${jobId}`),
   jobs: (databaseId: string) => request<Job[]>(`/jobs?database_id=${databaseId}`),
   cancelJob: (jobId: string) => json<Job>(`/jobs/${jobId}/cancel`, 'POST'),
+
+  like: (id: string, photoId: string) =>
+    request<void>(`/databases/${id}/photos/${photoId}/like`, { method: 'PUT' }),
+  unlike: (id: string, photoId: string) =>
+    request<void>(`/databases/${id}/photos/${photoId}/like`, { method: 'DELETE' }),
+  favorite: (id: string, photoId: string) =>
+    request<void>(`/databases/${id}/photos/${photoId}/favorite`, { method: 'PUT' }),
+  unfavorite: (id: string, photoId: string) =>
+    request<void>(`/databases/${id}/photos/${photoId}/favorite`, { method: 'DELETE' }),
+  profile: () => request<Profile>('/profile'),
 
   exportUrl: (id: string) => `/api/databases/${id}/export.zip`,
   thumbUrl: (id: string, photoId: string) => `/api/databases/${id}/photos/${photoId}/thumb`,

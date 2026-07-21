@@ -38,6 +38,16 @@
 
   --gap: 20px;
   --radius: 3px;
+
+  /*
+    Акцент «Якутия» — узкая орнаментальная лента (топбар, вход), поверх
+    основной тёмно-сланцевой темы, а не вместо неё. Цвета — лёд/полярное небо
+    и белый, тот же дуэт, что на флаге и в серебряной чеканке саха; янтарь
+    (--signal) остаётся единственным цветом действия, чтобы не спорить с ним.
+  */
+  --sakha-ice: #5fb8e0;
+  --sakha-ice-dim: #2e5a70;
+  --sakha-snow: #eaf6fb;
 }
 
 @media (prefers-color-scheme: light) {
@@ -50,6 +60,7 @@
     --muted: #4b5a66;
     --signal-text: #8a5a00;
     --danger-text: #a6342e;
+    --sakha-ice-dim: #bfe4f2;
   }
 }
 
@@ -124,12 +135,41 @@ body {
 }
 
 .topbar {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 16px;
   padding: 14px clamp(16px, 4vw, 40px);
   border-bottom: 1px solid var(--rule);
   background: var(--panel);
+}
+
+/*
+  Орнаментальная лента — лёд/снег по краю топбара. Тот же приём — ::before/
+  ::after с repeating-linear-gradient — переиспользуется на экране входа
+  (.sakha-band), чтобы акцент не выглядел случайной деталью в одном месте.
+*/
+.topbar::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: -3px;
+  height: 3px;
+  background: repeating-linear-gradient(
+    45deg,
+    var(--sakha-ice) 0 8px,
+    var(--sakha-snow) 8px 16px
+  );
+}
+
+.sakha-band {
+  height: 4px;
+  background: repeating-linear-gradient(
+    45deg,
+    var(--sakha-ice) 0 8px,
+    var(--sakha-snow) 8px 16px
+  );
 }
 
 .topbar__mark {
@@ -142,6 +182,26 @@ body {
 
 .topbar__spacer {
   flex: 1;
+}
+
+.topbar__nav {
+  display: flex;
+  gap: 4px;
+}
+
+.topbar__link {
+  padding: 6px 12px;
+  border-radius: 2px;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: 13px;
+}
+.topbar__link:hover {
+  color: var(--text);
+}
+.topbar__link.active {
+  color: var(--signal-text);
+  background: var(--panel-hi);
 }
 
 .page {
@@ -554,6 +614,7 @@ body {
 
 .card__frame {
   display: block;
+  position: relative;
   aspect-ratio: 1;
   width: 100%;
   background: var(--void);
@@ -695,6 +756,54 @@ body {
   border-color: var(--danger-text);
 }
 
+/* Лайк и избранное — видны всегда, а не только при наведении: это состояние,
+   а не действие, и его нужно узнавать с первого взгляда на сетку. */
+.card__marks {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  display: flex;
+  gap: 4px;
+}
+
+.card__mark {
+  width: 26px;
+  height: 26px;
+  border-radius: 2px;
+  border: 1px solid var(--rule);
+  background: rgba(15, 21, 27, 0.85);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.card__mark:hover {
+  border-color: var(--signal-text);
+  color: var(--signal-text);
+}
+
+.card__mark[data-active='true'] {
+  color: var(--danger-text);
+  border-color: var(--danger-text);
+}
+
+/* Метка сгенерированного YandexART снимка — поверх превью, чтобы не спутать
+   с найденным в базе кадром. */
+.card__badge {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  padding: 3px 8px;
+  background: rgba(15, 21, 27, 0.85);
+  color: var(--signal-text);
+  font-family: var(--display);
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  text-align: center;
+}
+
 /* --- прогресс -------------------------------------------------------- */
 
 .job {
@@ -730,20 +839,93 @@ body {
 .lightbox {
   position: fixed;
   inset: 0;
-  background: rgba(8, 12, 16, 0.94);
   display: flex;
   align-items: center;
   justify-content: center;
   padding: 32px;
-  border: 0;
   z-index: 10;
+}
+
+.lightbox__scrim {
+  position: absolute;
+  inset: 0;
+  background: rgba(8, 12, 16, 0.94);
+  border: 0;
   cursor: zoom-out;
 }
 
-.lightbox img {
-  max-width: 100%;
+.lightbox__panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  max-width: min(900px, 100%);
   max-height: 100%;
+  overflow-y: auto;
+}
+
+.lightbox__image {
+  max-width: 100%;
+  max-height: 60vh;
   object-fit: contain;
+  border-radius: var(--radius);
+}
+
+.lightbox__close {
+  position: absolute;
+  top: -8px;
+  right: -8px;
+  width: 32px;
+  height: 32px;
+  border-radius: 2px;
+  border: 1px solid var(--rule);
+  background: var(--panel);
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 18px;
+  line-height: 1;
+}
+.lightbox__close:hover {
+  color: var(--danger-text);
+  border-color: var(--danger-text);
+}
+
+.lightbox__marks {
+  display: flex;
+  gap: 6px;
+}
+
+.lightbox__similar {
+  width: 100%;
+}
+
+.lightbox__similar-row {
+  display: flex;
+  gap: 10px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+.lightbox__similar-item {
+  flex: 0 0 auto;
+  width: 96px;
+  height: 96px;
+  padding: 0;
+  border: 1px solid var(--rule);
+  border-radius: var(--radius);
+  overflow: hidden;
+  cursor: pointer;
+  background: var(--void);
+}
+.lightbox__similar-item:hover {
+  border-color: var(--signal);
+}
+.lightbox__similar-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 
 .skeleton {

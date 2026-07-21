@@ -87,6 +87,70 @@ CREATE TABLE IF NOT EXISTS chat_members (
     checked_at TEXT NOT NULL,
     PRIMARY KEY (chat_id, user_id)
 );
+
+-- Лайк и «избранное» — независимые отметки одного пользователя на фото любой
+-- базы, которую он видит (своя, демо, чат). photo_id не FK: фотографии живут
+-- в файлах базы (core.store), а не в SQLite — при удалении фото строку чистит
+-- вызывающий код (см. web/services.py).
+CREATE TABLE IF NOT EXISTS photo_likes (
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    database_id TEXT NOT NULL REFERENCES databases(id) ON DELETE CASCADE,
+    photo_id    TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    PRIMARY KEY (user_id, database_id, photo_id)
+);
+CREATE INDEX IF NOT EXISTS idx_photo_likes_user ON photo_likes(user_id);
+
+CREATE TABLE IF NOT EXISTS photo_favorites (
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    database_id TEXT NOT NULL REFERENCES databases(id) ON DELETE CASCADE,
+    photo_id    TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    PRIMARY KEY (user_id, database_id, photo_id)
+);
+CREATE INDEX IF NOT EXISTS idx_photo_favorites_user ON photo_favorites(user_id);
+
+-- Снимок, сгенерированный YandexART вместо пустой выдачи (web/services.py).
+-- Без user_id: принадлежит базе, а не тому, чей запрос его вызвал, — база
+-- личная, и следующий такой же запрос найдёт его обычным поиском.
+CREATE TABLE IF NOT EXISTS ai_generated_photos (
+    database_id TEXT NOT NULL REFERENCES databases(id) ON DELETE CASCADE,
+    photo_id    TEXT NOT NULL,
+    prompt      TEXT NOT NULL,
+    created_at  TEXT NOT NULL,
+    PRIMARY KEY (database_id, photo_id)
+);
+
+-- Учёт вызовов YandexART для лимита в сутки на пользователя: ключ общий на
+-- всю команду, и без лимита один активный пользователь исчерпал бы квоту всем.
+CREATE TABLE IF NOT EXISTS generation_log (
+    id         TEXT PRIMARY KEY,
+    user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_generation_log_user ON generation_log(user_id, created_at);
+
+-- История текстовых запросов и просмотров фото — основа персональной ленты
+-- (web/feed.py): лента повторяет недавние запросы и ищет похожее на то, что
+-- человек уже лайкнул, добавил в избранное или открыл.
+CREATE TABLE IF NOT EXISTS search_history (
+    id          TEXT PRIMARY KEY,
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    database_id TEXT NOT NULL REFERENCES databases(id) ON DELETE CASCADE,
+    query       TEXT NOT NULL,
+    used_query  TEXT NOT NULL,
+    created_at  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_search_history_user ON search_history(user_id, created_at);
+
+CREATE TABLE IF NOT EXISTS photo_views (
+    user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    database_id TEXT NOT NULL REFERENCES databases(id) ON DELETE CASCADE,
+    photo_id    TEXT NOT NULL,
+    viewed_at   TEXT NOT NULL,
+    PRIMARY KEY (user_id, database_id, photo_id)
+);
+CREATE INDEX IF NOT EXISTS idx_photo_views_user ON photo_views(user_id, viewed_at);
 """
 
 
@@ -525,3 +589,200 @@ def fail_unfinished_jobs(message: str) -> int:
             (message, now(), *ACTIVE_JOB_STATUSES),
         )
         return cur.rowcount
+
+
+# --------------------------------------------------------------------------
+# Лайки и избранное
+# --------------------------------------------------------------------------
+# Одна и та же форма для двух независимых таблиц (лайк и избранное — раздельные
+# отметки, см. AskUserQuestion в ходе разработки), поэтому логика общая, а
+# наружу выведены именованные функции — вызывающему коду не нужно знать про
+# имя таблицы.
+
+def _mark_photo(table: str, user_id: str, database_id: str, photo_id: str) -> None:
+    with connect() as conn:
+        conn.execute(
+            f"INSERT OR IGNORE INTO {table} (user_id, database_id, photo_id, created_at)"
+            " VALUES (?, ?, ?, ?)",
+            (user_id, database_id, photo_id, now()),
+        )
+
+
+def _unmark_photo(table: str, user_id: str, database_id: str, photo_id: str) -> None:
+    with connect() as conn:
+        conn.execute(
+            f"DELETE FROM {table} WHERE user_id = ? AND database_id = ? AND photo_id = ?",
+            (user_id, database_id, photo_id),
+        )
+
+
+def _marked_photo_ids(
+    table: str, user_id: str, database_id: str, photo_ids: list[str]
+) -> set[str]:
+    """Какие из photo_ids отмечены — один запрос на страницу/выдачу, а не N."""
+    if not photo_ids:
+        return set()
+    placeholders = ",".join("?" * len(photo_ids))
+    with connect() as conn:
+        rows = conn.execute(
+            f"SELECT photo_id FROM {table}"
+            f" WHERE user_id = ? AND database_id = ? AND photo_id IN ({placeholders})",
+            (user_id, database_id, *photo_ids),
+        ).fetchall()
+    return {row["photo_id"] for row in rows}
+
+
+def _list_marked(table: str, user_id: str) -> list[dict[str, Any]]:
+    """Отметки пользователя по всем базам — свежие сначала, вместе с именем базы."""
+    with connect() as conn:
+        rows = conn.execute(
+            f"SELECT m.database_id, m.photo_id, m.created_at,"
+            f" d.name AS database_name, d.kind AS database_kind"
+            f" FROM {table} m JOIN databases d ON d.id = m.database_id"
+            f" WHERE m.user_id = ? ORDER BY m.created_at DESC",
+            (user_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def like_photo(user_id: str, database_id: str, photo_id: str) -> None:
+    _mark_photo("photo_likes", user_id, database_id, photo_id)
+
+
+def unlike_photo(user_id: str, database_id: str, photo_id: str) -> None:
+    _unmark_photo("photo_likes", user_id, database_id, photo_id)
+
+
+def liked_photo_ids(user_id: str, database_id: str, photo_ids: list[str]) -> set[str]:
+    return _marked_photo_ids("photo_likes", user_id, database_id, photo_ids)
+
+
+def list_liked_photos(user_id: str) -> list[dict[str, Any]]:
+    return _list_marked("photo_likes", user_id)
+
+
+def favorite_photo(user_id: str, database_id: str, photo_id: str) -> None:
+    _mark_photo("photo_favorites", user_id, database_id, photo_id)
+
+
+def unfavorite_photo(user_id: str, database_id: str, photo_id: str) -> None:
+    _unmark_photo("photo_favorites", user_id, database_id, photo_id)
+
+
+def favorited_photo_ids(user_id: str, database_id: str, photo_ids: list[str]) -> set[str]:
+    return _marked_photo_ids("photo_favorites", user_id, database_id, photo_ids)
+
+
+def list_favorite_photos(user_id: str) -> list[dict[str, Any]]:
+    return _list_marked("photo_favorites", user_id)
+
+
+def forget_photo_marks(database_id: str, photo_ids: list[str]) -> None:
+    """Чистит лайки/избранное/просмотры/отметку генерации при удалении фото — иначе они ссылались бы в никуда."""
+    if not photo_ids:
+        return
+    placeholders = ",".join("?" * len(photo_ids))
+    with connect() as conn:
+        for table in ("photo_likes", "photo_favorites", "ai_generated_photos", "photo_views"):
+            conn.execute(
+                f"DELETE FROM {table} WHERE database_id = ? AND photo_id IN ({placeholders})",
+                (database_id, *photo_ids),
+            )
+
+
+# --------------------------------------------------------------------------
+# Генерация фото (YandexART)
+# --------------------------------------------------------------------------
+
+def mark_ai_generated(database_id: str, photo_id: str, prompt: str) -> None:
+    with connect() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO ai_generated_photos (database_id, photo_id, prompt, created_at)"
+            " VALUES (?, ?, ?, ?)",
+            (database_id, photo_id, prompt[:500], now()),
+        )
+
+
+def ai_generated_photo_ids(database_id: str, photo_ids: list[str]) -> set[str]:
+    if not photo_ids:
+        return set()
+    placeholders = ",".join("?" * len(photo_ids))
+    with connect() as conn:
+        rows = conn.execute(
+            f"SELECT photo_id FROM ai_generated_photos"
+            f" WHERE database_id = ? AND photo_id IN ({placeholders})",
+            (database_id, *photo_ids),
+        ).fetchall()
+    return {row["photo_id"] for row in rows}
+
+
+def log_generation(user_id: str) -> None:
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO generation_log (id, user_id, created_at) VALUES (?, ?, ?)",
+            (new_id(), user_id, now()),
+        )
+
+
+def count_generations_today(user_id: str) -> int:
+    """Скользящие 24 часа, а не календарный день — проще и без часовых поясов."""
+    since = (datetime.now(timezone.utc) - timedelta(hours=24)).isoformat(timespec="seconds")
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM generation_log WHERE user_id = ? AND created_at >= ?",
+            (user_id, since),
+        ).fetchone()
+    return int(row[0])
+
+
+# --------------------------------------------------------------------------
+# История поиска и просмотров — сиды для персональной ленты (web/feed.py)
+# --------------------------------------------------------------------------
+
+def log_search(user_id: str, database_id: str, query: str, used_query: str) -> None:
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO search_history (id, user_id, database_id, query, used_query, created_at)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (new_id(), user_id, database_id, query[:500], used_query[:500], now()),
+        )
+
+
+def recent_queries(user_id: str, limit: int = 5) -> list[dict[str, Any]]:
+    """Последние уникальные пары (база, текст запроса в модели) — повторы схлопываются в один, самый свежий."""
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT database_id, used_query, MAX(created_at) AS created_at FROM search_history"
+            " WHERE user_id = ? GROUP BY database_id, used_query ORDER BY created_at DESC LIMIT ?",
+            (user_id, limit),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def log_photo_view(user_id: str, database_id: str, photo_id: str) -> None:
+    """Одна строка на пару (пользователь, фото) — повторный просмотр просто освежает дату."""
+    with connect() as conn:
+        conn.execute(
+            "INSERT INTO photo_views (user_id, database_id, photo_id, viewed_at) VALUES (?, ?, ?, ?)"
+            " ON CONFLICT(user_id, database_id, photo_id) DO UPDATE SET viewed_at = excluded.viewed_at",
+            (user_id, database_id, photo_id, now()),
+        )
+
+
+def recent_interacted_photos(user_id: str, limit: int = 15) -> list[dict[str, Any]]:
+    """
+    Свежие лайки, избранное и просмотры вперемешку — сиды для «похожего» в ленте.
+    Одно и то же фото может встретиться дважды (лайкнуто и позже просмотрено) —
+    для сидов это не проблема, а финальная лента дедуплицируется по фото отдельно.
+    """
+    with connect() as conn:
+        rows = conn.execute(
+            "SELECT database_id, photo_id, created_at AS at FROM photo_likes WHERE user_id = ?"
+            " UNION ALL"
+            " SELECT database_id, photo_id, created_at AS at FROM photo_favorites WHERE user_id = ?"
+            " UNION ALL"
+            " SELECT database_id, photo_id, viewed_at AS at FROM photo_views WHERE user_id = ?"
+            " ORDER BY at DESC LIMIT ?",
+            (user_id, user_id, user_id, limit),
+        ).fetchall()
+    return [dict(row) for row in rows]

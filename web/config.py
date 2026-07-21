@@ -73,6 +73,9 @@ class Settings:
     caption_blip_model: str
     search_text_min_score: float
     search_image_min_score: float
+    yandex_api_key: str
+    yandex_folder_id: str
+    yandex_generations_per_user_day: int
 
     @property
     def db_path(self) -> Path:
@@ -116,6 +119,11 @@ class Settings:
 
     def database_dir(self, user_id: str, database_id: str) -> Path:
         return self.user_dir(user_id) / "databases" / database_id
+
+    @property
+    def photo_generation_enabled(self) -> bool:
+        """Оба значения обязательны: без folder_id ключ YandexART не работает."""
+        return bool(self.yandex_api_key and self.yandex_folder_id)
 
 
 @lru_cache(maxsize=1)
@@ -169,6 +177,12 @@ def get_settings() -> Settings:
         # косинусы текст→фото и фото→фото у CLIP на разных шкалах.
         search_text_min_score=_float("SEARCH_TEXT_MIN_SCORE", 0.24),
         search_image_min_score=_float("SEARCH_IMAGE_MIN_SCORE", 0.75),
+        # Генерация фото через YandexART, когда поиск ничего не нашёл. Оба значения
+        # нужны для реального запроса (photo_generation_enabled), но читаем их
+        # порознь, чтобы настройки не падали при частично заполненном .env.
+        yandex_api_key=os.environ.get("YANDEX_API_KEY", "").strip(),
+        yandex_folder_id=os.environ.get("YANDEX_FOLDER_ID", "").strip(),
+        yandex_generations_per_user_day=_int("YANDEX_GENERATIONS_PER_USER_DAY", 5),
     )
 
 

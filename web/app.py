@@ -20,7 +20,7 @@ from web import db
 from web.captioning import activity, caption_worker
 from web.config import get_settings
 from web.jobs import job_queue, recover_interrupted_jobs
-from web.routers import auth, bot, databases, export, jobs, photos, search
+from web.routers import auth, bot, databases, export, feed, jobs, photos, profile, search
 
 # Мутирующие запросы обязаны нести этот заголовок. Простую HTML-форму с чужого сайта
 # так не подделать: заголовок требует XHR/fetch, а на них распространяется CORS.
@@ -159,6 +159,8 @@ def create_app() -> FastAPI:
     app.include_router(databases.router)
     app.include_router(databases.quota_router)
     app.include_router(photos.router)
+    app.include_router(profile.router)
+    app.include_router(feed.router)
     app.include_router(search.router)
     app.include_router(export.router)
     app.include_router(jobs.router)

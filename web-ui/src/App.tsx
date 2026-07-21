@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
-import { Navigate, Route, Routes } from 'react-router-dom'
+import { Link, Navigate, NavLink, Route, Routes } from 'react-router-dom'
 import { api, type User } from './api'
 import { Auth } from './pages/Auth'
 import { Databases } from './pages/Databases'
+import { Feed } from './pages/Feed'
+import { Profile } from './pages/Profile'
 import { Workspace } from './pages/Workspace'
 
 export function App() {
@@ -28,8 +30,25 @@ export function App() {
     <div className="shell">
       <header className="topbar">
         <span className="topbar__mark">Поиск по архиву</span>
+        <nav className="topbar__nav">
+          <NavLink
+            to="/"
+            end
+            className={({ isActive }) => `topbar__link${isActive ? ' active' : ''}`}
+          >
+            Лента
+          </NavLink>
+          <NavLink
+            to="/databases"
+            className={({ isActive }) => `topbar__link${isActive ? ' active' : ''}`}
+          >
+            Мои базы
+          </NavLink>
+        </nav>
         <span className="topbar__spacer" />
-        <span className="note">{user.display_name}</span>
+        <Link to="/profile" className="note" style={{ textDecoration: 'none' }}>
+          {user.display_name}
+        </Link>
         <button
           type="button"
           className="btn btn--quiet"
@@ -41,8 +60,10 @@ export function App() {
 
       <main className="page">
         <Routes>
-          <Route path="/" element={<Databases />} />
+          <Route path="/" element={<Feed />} />
+          <Route path="/databases" element={<Databases />} />
           <Route path="/db/:id" element={<Workspace />} />
+          <Route path="/profile" element={<Profile />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </main>
