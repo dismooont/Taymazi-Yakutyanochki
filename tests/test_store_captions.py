@@ -271,3 +271,52 @@ def test_missing_caption_index_is_not_an_error(store_with_photos):
     store, _ = store_with_photos
     assert store.search_captions(vector(1)) == []
     assert store.caption_index_model() == ""
+
+
+# --------------------------------------------------------------------------
+# Снятие подписи — текст и вектор должны уходить вместе
+# --------------------------------------------------------------------------
+
+def test_clear_caption_removes_text_and_vector(store_with_photos):
+    """
+    Правка подписи человеком: обнулить один текст, оставив вектор, значило бы, что
+    поиск по подписям продолжает находить снимок по уже стёртым словам.
+    """
+    store, ids = store_with_photos
+    store.set_caption_texts({ids[1]: "красный автобус"})
+    store.set_caption_vectors({ids[1]: vector(1)}, model="mini")
+    assert store.search_captions(vector(1))  # находится
+
+    assert store.clear_caption(ids[1]) is True
+
+    assert store.caption_of(ids[1]) == ""
+    assert store.search_captions(vector(1)) == []  # больше не находится
+    assert store.captions_coverage() == (0, 5)
+
+
+def test_clear_caption_survives_reopen(store_with_photos, tmp_path):
+    store, ids = store_with_photos
+    store.set_caption_texts({ids[0]: "кот"})
+    store.set_caption_vectors({ids[0]: vector(2)}, model="mini")
+    store.clear_caption(ids[0])
+
+    reopened = IndexStore.open(tmp_path / "db")
+    assert reopened.caption_of(ids[0]) == ""
+    assert reopened.search_captions(vector(2)) == []
+
+
+def test_clear_caption_when_nothing_to_clear(store_with_photos):
+    store, ids = store_with_photos
+    assert store.clear_caption(ids[0]) is False       # подписи и не было
+    assert store.clear_caption("нет-такого") is False  # и снимка нет
+
+
+def test_clearing_one_caption_keeps_the_others(store_with_photos):
+    store, ids = store_with_photos
+    store.set_caption_texts({ids[0]: "кот", ids[3]: "пёс"})
+    store.set_caption_vectors({ids[0]: vector(1), ids[3]: vector(2)}, model="mini")
+
+    store.clear_caption(ids[0])
+
+    assert [h.photo_id for h in store.search_captions(vector(2))] == [ids[3]]
+    assert store.captions_coverage() == (1, 5)

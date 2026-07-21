@@ -276,13 +276,112 @@ export interface Tile {
   caption?: string
 }
 
+/** Подпись под снимком: показ и, если разрешено, редактирование на месте. */
+function CaptionCell({
+  caption,
+  onSave,
+}: {
+  caption: string
+  onSave?: (caption: string) => Promise<void> | void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [value, setValue] = useState(caption)
+  const [busy, setBusy] = useState(false)
+
+  // если подпись сменилась извне (перезагрузка галереи), подхватываем её
+  useEffect(() => setValue(caption), [caption])
+
+  if (!onSave) {
+    return caption ? (
+      <p className="card__caption" title={caption}>
+        {caption}
+      </p>
+    ) : null
+  }
+
+  if (!editing) {
+    return caption ? (
+      <button
+        type="button"
+        className="card__caption card__caption--edit"
+        title="Изменить подпись"
+        onClick={() => setEditing(true)}
+      >
+        {caption}
+      </button>
+    ) : (
+      <button type="button" className="card__caption-add" onClick={() => setEditing(true)}>
+        + подпись
+      </button>
+    )
+  }
+
+  const commit = async () => {
+    if (value.trim() === caption) {
+      setEditing(false)
+      return
+    }
+    setBusy(true)
+    try {
+      await onSave(value.trim())
+      setEditing(false)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div className="card__caption-edit">
+      <textarea
+        className="field card__caption-input"
+        value={value}
+        autoFocus
+        rows={2}
+        maxLength={500}
+        placeholder="Опишите снимок своими словами"
+        disabled={busy}
+        onChange={(event) => setValue(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter' && !event.shiftKey) {
+            event.preventDefault()
+            commit()
+          }
+          if (event.key === 'Escape') {
+            setValue(caption)
+            setEditing(false)
+          }
+        }}
+      />
+      <div className="row" style={{ gap: 6 }}>
+        <button type="button" className="btn btn--primary" disabled={busy} onClick={commit}>
+          Сохранить
+        </button>
+        <button
+          type="button"
+          className="btn"
+          disabled={busy}
+          onClick={() => {
+            setValue(caption)
+            setEditing(false)
+          }}
+        >
+          Отмена
+        </button>
+      </div>
+    </div>
+  )
+}
+
 export function PhotoGrid({
   tiles,
   onRemove,
+  onEditCaption,
   fused = false,
 }: {
   tiles: Tile[]
   onRemove?: (photoId: string) => void
+  /** Задать/изменить подпись снимка. Если не передан — подписи только для чтения. */
+  onEditCaption?: (photoId: string, caption: string) => Promise<void> | void
   /** Выдача получена слиянием с поиском по подписям — оценка тогда не косинус. */
   fused?: boolean
 }) {
@@ -343,11 +442,10 @@ export function PhotoGrid({
               )}
             </figcaption>
 
-            {tile.caption && (
-              <p className="card__caption" title={tile.caption}>
-                {tile.caption}
-              </p>
-            )}
+            <CaptionCell
+              caption={tile.caption ?? ''}
+              onSave={onEditCaption ? (caption) => onEditCaption(tile.photoId, caption) : undefined}
+            />
 
             {onRemove && (
               <button

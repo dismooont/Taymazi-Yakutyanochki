@@ -89,12 +89,27 @@ class PhotoOut(BaseModel):
     photo_id: str
     bytes: int
     added_at: str
+    caption: str = ""  # подпись снимка (ручная или сгенерированная), может быть пустой
 
 
 class PhotoPageOut(BaseModel):
     total: int
     offset: int
     items: list[PhotoOut]
+
+
+class SetCaptionRequest(BaseModel):
+    # Пустая строка — снять подпись. Ограничение длины: подпись описывает один
+    # снимок, а не текст поста; заодно это защита от раздувания меты.
+    caption: str = Field(default="", max_length=500)
+
+
+class CaptionOut(BaseModel):
+    photo_id: str
+    caption: str
+    # попала ли подпись в поисковый индекс. False — сохранена только как текст
+    # (нет sentence-transformers), видна и экспортируется, но на поиск не влияет.
+    indexed: bool = False
 
 
 class AddPhotosOut(BaseModel):

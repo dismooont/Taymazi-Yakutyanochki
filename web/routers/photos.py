@@ -21,8 +21,15 @@ from web.config import get_settings
 from web.deps import OwnedDatabase, WritableDatabase
 from web import services
 from web.jobs import JobContext, job_queue
-from web.schemas import AddPhotosOut, DeletePhotosRequest, PhotoOut, PhotoPageOut
-from web.stores import database_root, store_for, sync_stats
+from web.schemas import (
+    AddPhotosOut,
+    CaptionOut,
+    DeletePhotosRequest,
+    PhotoOut,
+    PhotoPageOut,
+    SetCaptionRequest,
+)
+from web.stores import database_root, set_manual_caption, store_for, sync_stats
 
 router = APIRouter(prefix="/api/databases/{database_id}", tags=["photos"])
 
@@ -73,7 +80,8 @@ def list_photos(database: OwnedDatabase, offset: int = 0, limit: int = 60) -> Ph
         total=len(store),
         offset=offset,
         items=[
-            PhotoOut(photo_id=p.photo_id, bytes=p.bytes, added_at=p.added_at) for p in photos
+            PhotoOut(photo_id=p.photo_id, bytes=p.bytes, added_at=p.added_at, caption=p.caption)
+            for p in photos
         ],
     )
 
@@ -222,6 +230,30 @@ def import_archive(database: WritableDatabase, file: UploadFile = File(...)) -> 
         total=count,
     )
     return AddPhotosOut(job_id=job["id"])
+
+
+# --------------------------------------------------------------------------
+# Подпись вручную
+# --------------------------------------------------------------------------
+
+@router.put("/photos/{photo_id}/caption", response_model=CaptionOut)
+def set_caption(
+    database: WritableDatabase, photo_id: str, payload: SetCaptionRequest
+) -> CaptionOut:
+    """
+    Задать или изменить подпись снимка. Пустая строка снимает подпись.
+
+    WritableDatabase не пускает сюда демо-базу: она общая и только для чтения,
+    подписи COCO трогать нельзя.
+    """
+    store = store_for(database)
+    if store.get_photo(photo_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Фото не найдено")
+
+    indexed = set_manual_caption(store, photo_id, payload.caption)
+    # покрытие подписями видно в шапке базы («размечено X из Y») — обновляем
+    sync_stats(database["id"], store)
+    return CaptionOut(photo_id=photo_id, caption=store.caption_of(photo_id), indexed=indexed)
 
 
 # --------------------------------------------------------------------------

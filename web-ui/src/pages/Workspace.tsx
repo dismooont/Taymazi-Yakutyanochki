@@ -37,6 +37,7 @@ export function Workspace() {
         photoId: photo.photo_id,
         thumbUrl: api.thumbUrl(id, photo.photo_id),
         fileUrl: api.fileUrl(id, photo.photo_id),
+        caption: photo.caption,
       }))
       setGallery((current) => (offset === 0 ? tiles : [...current, ...tiles]))
     },
@@ -113,6 +114,29 @@ export function Workspace() {
       setError(e instanceof ApiError ? e.message : 'Не удалось добавить снимки')
     } finally {
       setBusy(false)
+    }
+  }
+
+  const editCaption = async (photoId: string, caption: string) => {
+    try {
+      const result = await api.setCaption(id, photoId, caption)
+      // подпись меняется и в галерее, и в результатах поиска — обновляем обе выдачи
+      const apply = (tile: Tile) =>
+        tile.photoId === photoId ? { ...tile, caption: result.caption } : tile
+      setGallery((current) => current.map(apply))
+      setResult((current) =>
+        current
+          ? {
+              ...current,
+              results: current.results.map((h) =>
+                h.photo_id === photoId ? { ...h, caption: result.caption } : h,
+              ),
+            }
+          : current,
+      )
+      setToast(result.caption ? 'Подпись сохранена' : 'Подпись снята')
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Не удалось сохранить подпись')
     }
   }
 
@@ -258,6 +282,7 @@ export function Workspace() {
             <PhotoGrid
               tiles={searchTiles}
               onRemove={database.read_only ? undefined : removePhoto}
+              onEditCaption={database.read_only ? undefined : editCaption}
               fused={result?.fused ?? false}
             />
           )}
@@ -291,7 +316,11 @@ export function Workspace() {
             <Empty title="В базе нет снимков" hint={database.read_only ? undefined : 'Добавьте их кнопкой в шапке.'} />
           ) : (
             <>
-              <PhotoGrid tiles={gallery} onRemove={database.read_only ? undefined : removePhoto} />
+              <PhotoGrid
+                tiles={gallery}
+                onRemove={database.read_only ? undefined : removePhoto}
+                onEditCaption={database.read_only ? undefined : editCaption}
+              />
               {gallery.length < galleryTotal && (
                 <button
                   type="button"

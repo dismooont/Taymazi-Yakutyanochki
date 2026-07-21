@@ -43,12 +43,20 @@ export interface Photo {
   photo_id: string
   bytes: number
   added_at: string
+  caption: string
 }
 
 export interface PhotoPage {
   total: number
   offset: number
   items: Photo[]
+}
+
+export interface CaptionResult {
+  photo_id: string
+  caption: string
+  /** попала ли подпись в поисковый индекс (иначе сохранена только как текст) */
+  indexed: boolean
 }
 
 export interface SearchHit {
@@ -163,6 +171,8 @@ export const api = {
     request<PhotoPage>(`/databases/${id}/photos?offset=${offset}&limit=${limit}`),
   deletePhoto: (id: string, photoId: string) =>
     request<void>(`/databases/${id}/photos/${photoId}`, { method: 'DELETE' }),
+  setCaption: (id: string, photoId: string, caption: string) =>
+    json<CaptionResult>(`/databases/${id}/photos/${photoId}/caption`, 'PUT', { caption }),
 
   addPhotos: (id: string, files: File[]) => {
     const form = new FormData()

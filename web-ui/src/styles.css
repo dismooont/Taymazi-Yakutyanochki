@@ -585,6 +585,53 @@ body {
   overflow: hidden;
 }
 
+/* Подпись как кнопка редактирования: выглядит как текст, но кликается. */
+.card__caption--edit {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  cursor: text;
+  font: inherit;
+}
+.card__caption--edit:hover {
+  color: var(--text);
+}
+
+/* «+ подпись» у снимка без подписи — ненавязчиво, проявляется при наведении. */
+.card__caption-add {
+  margin: 0 10px 10px;
+  padding: 2px 0;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-family: var(--display);
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  opacity: 0.55;
+}
+.card:hover .card__caption-add {
+  opacity: 1;
+}
+.card__caption-add:hover {
+  color: var(--signal);
+}
+
+.card__caption-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 0 10px 10px;
+}
+.card__caption-input {
+  width: 100%;
+  resize: vertical;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .card__remove {
   position: absolute;
   top: 8px;

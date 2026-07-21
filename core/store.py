@@ -622,6 +622,26 @@ class IndexStore:
                 self._persist()
             return changed
 
+    def clear_caption(self, photo_id: str) -> bool:
+        """
+        Снимает подпись целиком — и текст, и вектор. Нужно, когда подпись правит
+        человек: обнулить один только текст, оставив вектор, значило бы, что поиск
+        по подписям продолжит находить снимок по уже стёртым словам.
+
+        Возвращает False, если снимать было нечего (нет снимка или подписи).
+        """
+        with self._lock:
+            if self._legacy:
+                raise StoreError("Legacy-база открыта только для чтения")
+            row = self._by_id.get(photo_id)
+            if row is None or not self._photos[row].caption:
+                return False
+            self._photos[row].caption = ""
+            self._photos[row].caption_model = ""
+            self._persist()
+            self._drop_caption_vectors_of({photo_id})
+            return True
+
     def caption_of(self, photo_id: str) -> str:
         photo = self.get_photo(photo_id)
         return photo.caption if photo else ""

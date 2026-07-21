@@ -65,6 +65,35 @@ def caption_encoder_for(store: IndexStore):
     return CaptionEncoder.get(settings.caption_model).encode_one
 
 
+def set_manual_caption(store: IndexStore, photo_id: str, caption: str) -> bool:
+    """
+    Сохраняет подпись, введённую пользователем вручную. Снимок должен существовать —
+    проверку делает вызывающий (роутер отвечает 404). Возвращает, попала ли подпись
+    в поисковый индекс: True — векторизована и влияет на поиск; False — сохранена
+    только как текст (или снята).
+
+    Кодируем при одном условии — что библиотека вообще есть, — а не при включённом
+    поиске по подписям. Иначе получилась бы рассинхронизация: текст подписи есть, а
+    вектора нет, и фоновый генератор такой снимок обошёл бы (у него уже есть текст).
+    Когда `sentence-transformers` не установлен, векторов нет ни у кого, и подпись
+    просто хранится как текст — она всё равно видна на снимке и уходит в экспорт.
+
+    Пустая строка снимает подпись целиком (текст и вектор), см. IndexStore.clear_caption.
+    """
+    caption = caption.strip()
+    if not caption:
+        store.clear_caption(photo_id)
+        return False
+
+    store.set_caption_texts({photo_id: caption}, model="manual")
+    if not caption_encoder_available():
+        return False
+    encoder = CaptionEncoder.get(get_settings().caption_model)
+    store.set_caption_vectors({photo_id: encoder.encode_one(caption)},
+                              model=get_settings().caption_model)
+    return True
+
+
 class StoreCache:
     def __init__(self, capacity: int = DEFAULT_CAPACITY, ttl: float = DEFAULT_TTL_SECONDS):
         self.capacity = capacity
