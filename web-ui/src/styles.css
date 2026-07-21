@@ -1,29 +1,56 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto+Condensed:wght@700&family=Roboto+Mono:wght@400;500&display=swap');
+
 /*
   Оформление: тёмный сланец плюс янтарь — безопасный свет фотолаборатории.
-  Тёмный фон здесь не мода, а функция: снимки на нейтральном тёмном читаются лучше,
-  чем на светлом, где интерфейс спорит с содержимым.
+  Тёмный фон здесь не мода, а функция: снимки на нейтральном тёмном читаются лучше.
+  Есть и светлая тема (@media prefers-color-scheme): те же роли, но панели светлеют,
+  а янтарь как ТЕКСТ темнеет до --signal-text, иначе он нечитаем на белом.
 
-  Янтарный цвет зарезервирован под одно значение — близость результата к запросу.
-  Больше он не появляется нигде, поэтому взгляд сразу считывает, где мера, а где
-  просто интерфейс.
+  Янтарь несёт смысл «важно/выбрано»: близость результата, главное действие, активная
+  вкладка. За заливку отвечает --signal, за текст — --signal-text. Разделение нужно
+  ровно из-за светлой темы: янтарная заливка на обеих читается, янтарный текст — нет.
 */
 
 :root {
+  color-scheme: dark light;
+
   --void: #0f151b;
   --panel: #182029;
   --panel-hi: #202b36;
   --rule: #2b3844;
   --text: #e7eef4;
   --muted: #90a3b4;
-  --signal: #f0b429;
-  --danger: #e5605f;
 
-  --display: 'Arial Narrow', 'Helvetica Neue', 'Segoe UI', system-ui, sans-serif;
-  --body: system-ui, 'Segoe UI', Roboto, sans-serif;
-  --mono: ui-monospace, 'Cascadia Mono', Consolas, 'SF Mono', monospace;
+  --signal: #f0b429;       /* заливки: полоса близости, primary-кнопка, подчёркивание вкладки */
+  --signal-hi: #f7c55e;    /* наведение */
+  --signal-press: #d89a1f; /* нажатие */
+  --signal-text: #f0b429;  /* янтарь как текст (в светлой теме темнеет) */
+  --on-signal: #1a1206;    /* текст на янтарной заливке */
+
+  --danger: #e5605f;
+  --danger-solid: #c1443f; /* сплошная разрушительная кнопка */
+  --danger-text: #e5605f;  /* красный как текст (в светлой теме темнеет) */
+  --on-danger: #ffffff;
+
+  --display: 'Roboto Condensed', 'Arial Narrow', 'Segoe UI', system-ui, sans-serif;
+  --body: 'Inter', system-ui, 'Segoe UI', Roboto, sans-serif;
+  --mono: 'Roboto Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
 
   --gap: 20px;
   --radius: 3px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --void: #eef1f4;
+    --panel: #ffffff;
+    --panel-hi: #e3e8ec;
+    --rule: #c7d0d6;
+    --text: #101820;
+    --muted: #4b5a66;
+    --signal-text: #8a5a00;
+    --danger-text: #a6342e;
+  }
 }
 
 *,
@@ -142,40 +169,49 @@ body {
 
 .btn {
   font-family: var(--display);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  letter-spacing: 0.01em;
   color: var(--text);
-  background: var(--panel-hi);
+  background: var(--panel);
   border: 1px solid var(--rule);
   border-radius: var(--radius);
-  padding: 10px 18px;
+  padding: 12px 20px;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
   text-decoration: none;
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
 }
 
 .btn:hover:not(:disabled) {
-  background: #27333f;
-  border-color: #3b4a58;
+  background: var(--panel-hi);
+  border-color: var(--rule);
 }
 
 .btn:disabled {
-  opacity: 0.45;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
+/* Главное действие — единственная янтарная заливка среди кнопок. Текст тёмный
+   (--on-signal): на янтаре светлый нечитаем. */
 .btn--primary {
-  background: var(--text);
-  color: var(--void);
-  border-color: var(--text);
+  background: var(--signal);
+  color: var(--on-signal);
+  border-color: var(--signal);
 }
 
 .btn--primary:hover:not(:disabled) {
-  background: #fff;
-  border-color: #fff;
+  background: var(--signal-hi);
+  border-color: var(--signal-hi);
+}
+
+.btn--primary:active:not(:disabled) {
+  background: var(--signal-press);
+  border-color: var(--signal-press);
 }
 
 .btn--quiet {
@@ -190,25 +226,28 @@ body {
   color: var(--text);
 }
 
+/* Разрушительное действие как тихий модификатор: краснеет при наведении, а не
+   кричит сплошной заливкой. Сплошная кнопка (--danger-solid/--on-danger) заложена
+   в токенах на случай отдельного подтверждения удаления. */
 .btn--danger:hover:not(:disabled) {
-  border-color: var(--danger);
-  color: var(--danger);
+  border-color: var(--danger-text);
+  color: var(--danger-text);
   background: transparent;
 }
 
 .field {
   width: 100%;
-  background: var(--void);
+  background: var(--panel);
   color: var(--text);
   border: 1px solid var(--rule);
   border-radius: var(--radius);
-  padding: 12px 14px;
+  padding: 10px 16px;
   font-family: var(--body);
   font-size: 15px;
 }
 
 .field::placeholder {
-  color: #5f7385;
+  color: var(--muted);
 }
 
 .label {
@@ -216,7 +255,7 @@ body {
   font-family: var(--display);
   font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.16em;
+  letter-spacing: 0.04em;
   text-transform: uppercase;
   color: var(--muted);
   margin-bottom: 6px;
@@ -229,7 +268,7 @@ body {
 }
 
 .error {
-  color: var(--danger);
+  color: var(--danger-text);
   font-size: 14px;
   margin: 0;
 }
@@ -242,33 +281,31 @@ body {
   padding-inline: 20px;
 }
 
+/* Вкладки-подчёркивание: активная помечена янтарной чертой снизу, а не заливкой.
+   Так переключатель не спорит за внимание с содержимым под ним. */
 .tabs {
   display: flex;
-  gap: 2px;
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
-  padding: 2px;
-  background: var(--panel);
+  gap: 24px;
+  border-bottom: 1px solid var(--rule);
 }
 
 .tabs__item {
-  flex: 1;
   font-family: var(--display);
-  font-size: 12px;
+  font-size: 14px;
   font-weight: 700;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  padding: 9px 10px;
+  letter-spacing: 0.01em;
+  padding: 8px 4px;
   background: transparent;
   color: var(--muted);
   border: 0;
-  border-radius: 2px;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
   cursor: pointer;
 }
 
 .tabs__item[aria-selected='true'] {
-  background: var(--panel-hi);
   color: var(--text);
+  border-bottom-color: var(--signal);
 }
 
 .divider {
@@ -303,7 +340,7 @@ body {
 }
 
 .entry:hover {
-  border-color: #3b4a58;
+  border-color: var(--muted);
   background: var(--panel-hi);
 }
 
@@ -449,7 +486,7 @@ body {
 }
 
 .droparea:hover {
-  border-color: #3b4a58;
+  border-color: var(--muted);
   background: var(--panel-hi);
 }
 
@@ -473,7 +510,7 @@ body {
 
 .drop[data-over='true'] {
   border-color: var(--signal);
-  color: var(--signal);
+  color: var(--signal-text);
 }
 
 .console__alt {
@@ -498,7 +535,7 @@ body {
 }
 
 .console__sent {
-  color: var(--signal);
+  color: var(--signal-text);
 }
 
 .grid {
@@ -519,7 +556,7 @@ body {
   display: block;
   aspect-ratio: 1;
   width: 100%;
-  background: #0b1015;
+  background: var(--void);
   border: 0;
   padding: 0;
   cursor: zoom-in;
@@ -566,7 +603,7 @@ body {
 .card__score {
   font-family: var(--mono);
   font-size: 12px;
-  color: var(--signal);
+  color: var(--signal-text);
   font-variant-numeric: tabular-nums;
 }
 
@@ -616,7 +653,7 @@ body {
   opacity: 1;
 }
 .card__caption-add:hover {
-  color: var(--signal);
+  color: var(--signal-text);
 }
 
 .card__caption-edit {
@@ -654,8 +691,8 @@ body {
 }
 
 .card__remove:hover {
-  color: var(--danger);
-  border-color: var(--danger);
+  color: var(--danger-text);
+  border-color: var(--danger-text);
 }
 
 /* --- прогресс -------------------------------------------------------- */
