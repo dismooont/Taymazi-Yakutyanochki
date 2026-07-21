@@ -31,6 +31,12 @@ def app_env(tmp_path, monkeypatch, holder):
                     "TELEGRAM_AUTH_ENABLED", "TELEGRAM_PROXY", "PUBLIC_URL"):
         monkeypatch.delenv(leaking, raising=False)
     monkeypatch.setenv("PUBLIC_URL", "http://localhost:5173")
+    # Порог «только похожее» выключаем: у заглушки модели косинусы случайны (и бывают
+    # отрицательными), боевые умолчания 0,24/0,75 отсекли бы результаты. Именно -1, а
+    # не 0: косинус всегда >= -1, а порог 0 срезал бы антикоррелирующие. Саму
+    # фильтрацию проверяют отдельные тесты (tests/test_web_search_threshold.py).
+    monkeypatch.setenv("SEARCH_TEXT_MIN_SCORE", "-1")
+    monkeypatch.setenv("SEARCH_IMAGE_MIN_SCORE", "-1")
     reset_settings()
     login_limiter.clear()
     register_limiter.clear()

@@ -14,6 +14,7 @@ import io
 from fastapi import APIRouter, File, HTTPException, UploadFile, status
 from PIL import Image, ImageOps, UnidentifiedImageError
 
+from web.config import get_settings
 from web.deps import CurrentUser, OwnedDatabase
 from web.schemas import CaptionHitOut, SearchHitOut, SearchResultOut, SearchTextRequest
 from web.security import RateLimiter
@@ -58,6 +59,7 @@ def search_by_text(
         top_k=payload.top_k,
         translate=payload.translate,
         caption_encoder=encoder,
+        min_score=get_settings().search_text_min_score,
     )
     return SearchResultOut(
         used_query=used_query,
@@ -90,7 +92,10 @@ def search_by_image(
         ) from e
 
     store = store_for(database)
-    hits, captions = store.search_image(image, top_k=max(1, min(top_k, 50)))
+    hits, captions = store.search_image(
+        image, top_k=max(1, min(top_k, 50)),
+        min_score=get_settings().search_image_min_score,
+    )
     return SearchResultOut(
         results=_hits(database, hits),
         captions=[

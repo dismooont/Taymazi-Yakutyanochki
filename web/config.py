@@ -40,6 +40,14 @@ def _int(name: str, default: int) -> int:
         return default
 
 
+def _float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    try:
+        return float(raw) if raw is not None else default
+    except ValueError:
+        return default
+
+
 @dataclass(frozen=True)
 class Settings:
     data_dir: Path
@@ -63,6 +71,8 @@ class Settings:
     caption_force_after: float
     caption_threads: int | None
     caption_blip_model: str
+    search_text_min_score: float
+    search_image_min_score: float
 
     @property
     def db_path(self) -> Path:
@@ -153,6 +163,12 @@ def get_settings() -> Settings:
         caption_blip_model=os.environ.get(
             "CAPTION_BLIP_MODEL", "Salesforce/blip-image-captioning-base"
         ).strip(),
+        # Пороги «показывать только похожее». Умолчания измерены на COCO и заданы
+        # константами DEFAULT_*_MIN_SCORE в core/store.py (здесь литералами, чтобы не
+        # тянуть faiss в конфиг). 0 = показывать всё. Пороги раздельные, потому что
+        # косинусы текст→фото и фото→фото у CLIP на разных шкалах.
+        search_text_min_score=_float("SEARCH_TEXT_MIN_SCORE", 0.24),
+        search_image_min_score=_float("SEARCH_IMAGE_MIN_SCORE", 0.75),
     )
 
 

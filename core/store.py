@@ -85,6 +85,21 @@ CAPTION_FUSION_ALPHA = 0.7
 # лучше, чем портить выдачу на всё время разметки.
 CAPTION_FUSION_MIN_COVERAGE = 0.5
 CAPTION_FUSION_MIN_PHOTOS = 10
+
+# Пороги «показывать только похожее»: результат с косинусом ниже порога считается
+# не относящимся к запросу и в выдачу не идёт (по фото зебры не всплывают знаки).
+#
+# Пороги РАЗНЫЕ для двух режимов, и это не произвол: у CLIP косинусы фото→фото и
+# текст→фото лежат на несопоставимых шкалах. Замерено на COCO (5022 снимка):
+#   текст «a zebra»:  фон ~0,18, зебры 0,31–0,34  -> порог 0,24 отсекает фон;
+#   фото → фото:      фон ~0,47, похожие 0,85–0,92 -> порог 0,75, знак (~0,45) далеко ниже.
+# Значения — разумные умолчания, а не истина: на своём архиве их можно менять через
+# SEARCH_TEXT_MIN_SCORE / SEARCH_IMAGE_MIN_SCORE. Ядро порог по умолчанию НЕ применяет
+# (параметр min_score=None) — его задаёт вызывающий, чтобы тесты на заглушке модели,
+# у которой косинусы случайны, не зависели от боевых чисел.
+DEFAULT_TEXT_MIN_SCORE = 0.24
+DEFAULT_IMAGE_MIN_SCORE = 0.75
+
 ALLOWED_SUFFIXES = {".jpg", ".jpeg", ".png", ".webp"}
 THUMB_SIZE = 320
 # Индекс сбрасывается на диск не после каждого батча: write_index на 5000 векторов — это
@@ -815,6 +830,7 @@ class IndexStore:
         holder: ModelHolder | None = None,
         caption_encoder: "CaptionEncoderLike | None" = None,
         alpha: float = CAPTION_FUSION_ALPHA,
+        min_score: float | None = None,
     ) -> tuple[str, list[SearchHit]]:
         """
         Возвращает (использованный запрос, результаты). Пустая база -> пустой список.
@@ -832,9 +848,14 @@ class IndexStore:
         emb = holder.encode_texts([used_query])
 
         if caption_encoder is not None and self.fusion_ready():
+            # У слияния оценка — не косинус, а z-взвешенная сумма, поэтому косинусный
+            # порог к ней неприменим: фильтрация «только похожее» работает в обычном
+            # (не слитом) режиме. Слияние — опциональное и отдельно измеренное.
             return used_query, self._search_fused(emb, caption_encoder(used_query),
                                                   top_k, alpha)
-        return used_query, self._search(self._index, emb, top_k, self._hit_from_photo)
+        return used_query, self._search(
+            self._index, emb, top_k, self._hit_from_photo, min_score=min_score
+        )
 
     def fusion_ready(self) -> bool:
         """
@@ -911,7 +932,9 @@ class IndexStore:
         full[rows[0]] = scores[0]
         return full
 
-    def search_similar(self, photo_id: str, top_k: int = 5) -> list[SearchHit]:
+    def search_similar(
+        self, photo_id: str, top_k: int = 5, min_score: float | None = None
+    ) -> list[SearchHit]:
         """
         Похожие на снимок, который уже лежит в базе.
 
@@ -932,7 +955,9 @@ class IndexStore:
             )
 
         # берём на один больше, чтобы после выброса самого снимка осталось top_k
-        hits = self._search(self._index, vector, top_k + 1, self._hit_from_photo)
+        hits = self._search(
+            self._index, vector, top_k + 1, self._hit_from_photo, min_score=min_score
+        )
         return [hit for hit in hits if hit.photo_id != photo_id][:top_k]
 
     def search_image(
@@ -940,6 +965,7 @@ class IndexStore:
         image: Image.Image | str | Path,
         top_k: int = 5,
         holder: ModelHolder | None = None,
+        min_score: float | None = None,
     ) -> tuple[list[SearchHit], list[CaptionHit]]:
         """Похожие картинки и (если у базы есть индекс подписей) релевантные подписи."""
         holder = holder or ModelHolder.get()
@@ -947,7 +973,8 @@ class IndexStore:
             image = open_image(image)
         emb = holder.encode_images([image])
 
-        hits = self._search(self._index, emb, top_k, self._hit_from_photo)
+        # порог — только к похожим снимкам; подписи ниже это отдельная величина
+        hits = self._search(self._index, emb, top_k, self._hit_from_photo, min_score=min_score)
 
         captions: list[CaptionHit] = []
         if self._load_captions() is not None:
@@ -961,18 +988,22 @@ class IndexStore:
             )
         return hits, captions
 
-    def _search(self, index, emb: np.ndarray, top_k: int, build):
+    def _search(self, index, emb: np.ndarray, top_k: int, build, min_score: float | None = None):
         """
-        Общая обёртка над index.search. Главное здесь — фильтр row < 0: у пустой или
-        почти пустой базы FAISS возвращает -1 в незаполненных позициях, и прежний код
-        на этом падал бы, обращаясь к meta[-1].
+        Общая обёртка над index.search. Фильтр row < 0: у пустой или почти пустой базы
+        FAISS возвращает -1 в незаполненных позициях, и прежний код на этом падал бы,
+        обращаясь к meta[-1].
+
+        min_score, если задан, отсекает результаты с косинусом ниже порога — так в
+        выдачу попадают только похожие, а не top_k что попало. None = без порога.
         """
         if index is None or index.ntotal == 0 or top_k <= 0:
             return []
         with self._lock:
             scores, rows = index.search(emb, min(top_k, index.ntotal))
         return [build(int(row), float(score))
-                for row, score in zip(rows[0], scores[0]) if row >= 0]
+                for row, score in zip(rows[0], scores[0])
+                if row >= 0 and (min_score is None or score >= min_score)]
 
     def _hit_from_photo(self, row: int, score: float) -> SearchHit:
         photo = self._photos[row]

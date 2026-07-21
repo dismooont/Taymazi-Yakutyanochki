@@ -140,7 +140,8 @@ def search_chat(chat_id: str, payload: BotSearchRequest, _: ServiceAuth) -> BotS
     database = _chat_database(chat_id)
     store = store_for(database)
     used_query, hits = store.search_text(
-        payload.query.strip(), top_k=payload.top_k, translate=payload.translate
+        payload.query.strip(), top_k=payload.top_k, translate=payload.translate,
+        min_score=get_settings().search_text_min_score,
     )
     return BotSearchResultOut(
         used_query=used_query,
@@ -165,7 +166,10 @@ def similar_photos(chat_id: str, photo_id: str, _: ServiceAuth, top_k: int = 5) 
     """
     database = _chat_database(chat_id)
     store = store_for(database)
-    hits = store.search_similar(photo_id, top_k=max(1, min(top_k, 20)))
+    hits = store.search_similar(
+        photo_id, top_k=max(1, min(top_k, 20)),
+        min_score=get_settings().search_image_min_score,
+    )
     return BotSearchResultOut(
         used_query="",
         results=[
@@ -212,7 +216,8 @@ def search_demo(payload: BotSearchRequest, _: ServiceAuth) -> BotSearchResultOut
     database = _demo_database()
     store = store_for(database)
     used_query, hits = store.search_text(
-        payload.query.strip(), top_k=payload.top_k, translate=payload.translate
+        payload.query.strip(), top_k=payload.top_k, translate=payload.translate,
+        min_score=get_settings().search_text_min_score,
     )
     return BotSearchResultOut(
         used_query=used_query,
