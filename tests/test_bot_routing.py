@@ -56,9 +56,9 @@ async def _first_match(handlers, bot: Bot, message: Message) -> str:
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("text, expected", [
-    ("/demo красный автобус", "on_demo"),
-    ("/demo", "on_demo"),
-    ("/find собака", "on_find"),
+    ("/demo красный автобус", "on_demo_cmd"),
+    ("/demo", "on_demo_cmd"),
+    ("/find собака", "on_find_cmd"),
     ("/start", "on_start"),
     ("/stats", "on_stats"),
     ("/help", "on_help"),
@@ -66,6 +66,22 @@ async def _first_match(handlers, bot: Bot, message: Message) -> str:
     ("/чтототакое", "on_unknown_command"),
 ])
 async def test_private_routing(handlers, bot, text, expected):
+    assert await _first_match(handlers, bot, _message(text)) == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("text, expected", [
+    ("🔎 Найти", "on_find_btn"),
+    ("🎞 Демо", "on_demo_btn"),
+    ("📊 Статистика", "on_stats"),
+    ("📦 Архив", "on_export"),
+    ("❓ Помощь", "on_help_btn"),
+])
+async def test_menu_buttons_route_to_actions(handlers, bot, text, expected):
+    """
+    Кнопки нижнего меню — это обычный текст. Их обработчики обязаны стоять раньше
+    свободного текста, иначе «🔎 Найти» ушло бы в поиск как запрос.
+    """
     assert await _first_match(handlers, bot, _message(text)) == expected
 
 
@@ -78,4 +94,4 @@ async def test_group_text_is_ignored(handlers, bot):
 
 @pytest.mark.asyncio
 async def test_group_demo_works(handlers, bot):
-    assert await _first_match(handlers, bot, _message("/demo кот", "supergroup")) == "on_demo"
+    assert await _first_match(handlers, bot, _message("/demo кот", "supergroup")) == "on_demo_cmd"

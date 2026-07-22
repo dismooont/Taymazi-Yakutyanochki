@@ -270,6 +270,116 @@ def test_photos_from_bot_visible_on_site(bot_client, started_chat, client, app_e
 
 
 # --------------------------------------------------------------------------
+# Управление снимками из чата: паритет с сайтом (удаление, подпись, экспорт)
+# --------------------------------------------------------------------------
+
+def _add_photo(bot_client, color) -> str:
+    """Добавляет снимок в базу чата и возвращает его photo_id."""
+    r = bot_client.post(
+        f"/api/bot/chats/{CHAT}/photos",
+        files={"file": ("p.jpg", _jpeg(color), "image/jpeg")},
+        data={"telegram_user_id": "555", "display_name": "Иван"},
+    )
+    assert r.status_code == 200, r.text
+    return r.json()["photo_id"]
+
+
+def test_bot_can_delete_photo(bot_client, started_chat):
+    pid = _add_photo(bot_client, (10, 20, 30))
+
+    resp = bot_client.delete(f"/api/bot/chats/{CHAT}/photos/{pid}")
+    assert resp.status_code == 204
+
+    assert bot_client.get(f"/api/bot/chats/{CHAT}").json()["photos_count"] == 0
+    # повторное удаление того же — уже 404
+    assert bot_client.delete(f"/api/bot/chats/{CHAT}/photos/{pid}").status_code == 404
+
+
+def test_bot_can_set_and_clear_caption(bot_client, started_chat):
+    pid = _add_photo(bot_client, (40, 50, 60))
+
+    resp = bot_client.put(
+        f"/api/bot/chats/{CHAT}/photos/{pid}/caption", json={"caption": "рыжий кот"}
+    )
+    assert resp.status_code == 200
+    assert resp.json()["caption"] == "рыжий кот"
+
+    # подпись видна и на сайте — одна база
+    assert bot_client.get(f"/api/bot/chats/{CHAT}").json()["captions_count"] == 1
+
+    cleared = bot_client.put(
+        f"/api/bot/chats/{CHAT}/photos/{pid}/caption", json={"caption": ""}
+    )
+    assert cleared.json()["caption"] == ""
+    assert bot_client.get(f"/api/bot/chats/{CHAT}").json()["captions_count"] == 0
+
+
+def test_bot_caption_unknown_photo_404(bot_client, started_chat):
+    assert bot_client.put(
+        f"/api/bot/chats/{CHAT}/photos/нет-такого/caption", json={"caption": "x"}
+    ).status_code == 404
+
+
+def test_bot_export_returns_zip(bot_client, started_chat):
+    import io as _io
+    import zipfile
+
+    _add_photo(bot_client, (11, 22, 33))
+    _add_photo(bot_client, (99, 88, 77))
+
+    resp = bot_client.get(f"/api/bot/chats/{CHAT}/export.zip")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/zip"
+
+    with zipfile.ZipFile(_io.BytesIO(resp.content)) as z:
+        names = z.namelist()
+    # два снимка плюс манифест базы
+    assert sum(1 for n in names if n.startswith("photos/")) == 2
+    assert any("manifest" in n for n in names)
+
+
+def test_bot_import_zip(bot_client, started_chat):
+    """Импорт группы фото из zip: ставится задача, по ней снимки доезжают в базу."""
+    import io as _io
+    import time
+    import zipfile
+
+    buf = _io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for i in range(4):
+            z.writestr(f"photos/i{i}.jpg", _jpeg((i * 40 % 256, i * 30 % 256, i * 20 % 256)))
+
+    started = bot_client.post(
+        f"/api/bot/chats/{CHAT}/import",
+        files={"file": ("a.zip", buf.getvalue(), "application/zip")},
+    )
+    assert started.status_code == 200, started.text
+    assert started.json()["count"] == 4
+    job_id = started.json()["job_id"]
+
+    for _ in range(100):
+        job = bot_client.get(f"/api/bot/chats/{CHAT}/jobs/{job_id}").json()
+        if job["status"] in ("done", "error"):
+            break
+        time.sleep(0.2)
+    assert job["status"] == "done", job
+
+    assert bot_client.get(f"/api/bot/chats/{CHAT}").json()["photos_count"] == 4
+
+
+def test_bot_import_rejects_non_zip(bot_client, started_chat):
+    resp = bot_client.post(
+        f"/api/bot/chats/{CHAT}/import",
+        files={"file": ("notzip.jpg", _jpeg(), "image/jpeg")},
+    )
+    assert resp.status_code == 422  # inspect не признаёт это архивом
+
+
+def test_bot_job_status_unknown_is_404(bot_client, started_chat):
+    assert bot_client.get(f"/api/bot/chats/{CHAT}/jobs/нет-такой").status_code == 404
+
+
+# --------------------------------------------------------------------------
 # Демо-база через бота
 # --------------------------------------------------------------------------
 

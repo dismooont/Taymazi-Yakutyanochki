@@ -18,14 +18,28 @@ import shutil
 from pathlib import Path
 from typing import Annotated, Any
 
+import json
+
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, StreamingResponse
 
 from web import db, services
+from web.archive import ArchiveError, extract_images, inspect, stream_zip
 from web.config import get_settings
+from web.jobs import JobContext, job_queue
+from web.routers.export import _content_disposition
 from web.routers.photos import resolve_photo_file
-from web.schemas import BotChatOut, BotSearchRequest, BotSearchResultOut, SearchHitOut
-from web.stores import store_for
+from web.schemas import (
+    BotChatOut,
+    BotImportOut,
+    BotSearchRequest,
+    BotSearchResultOut,
+    CaptionOut,
+    JobOut,
+    SearchHitOut,
+    SetCaptionRequest,
+)
+from web.stores import set_manual_caption, store_for, sync_stats
 
 router = APIRouter(prefix="/api/bot", tags=["bot"])
 
@@ -189,6 +203,122 @@ def photo_file(chat_id: str, photo_id: str, _: ServiceAuth) -> FileResponse:
     """Бот забирает найденный снимок, чтобы отправить его в чат."""
     database = _chat_database(chat_id)
     return FileResponse(resolve_photo_file(database, photo_id, thumb=False))
+
+
+# --------------------------------------------------------------------------
+# Управление снимками из чата: то же, что доступно на сайте
+# --------------------------------------------------------------------------
+
+@router.delete("/chats/{chat_id}/photos/{photo_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_chat_photo(chat_id: str, photo_id: str, _: ServiceAuth) -> None:
+    database = _chat_database(chat_id)
+    services.require_writable(database)
+    store = store_for(database)
+    if store.delete_photos([photo_id]) == 0:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Фото не найдено")
+    sync_stats(database["id"], store)
+
+
+@router.put("/chats/{chat_id}/photos/{photo_id}/caption", response_model=CaptionOut)
+def set_chat_caption(
+    chat_id: str, photo_id: str, payload: SetCaptionRequest, _: ServiceAuth
+) -> CaptionOut:
+    database = _chat_database(chat_id)
+    services.require_writable(database)
+    store = store_for(database)
+    if store.get_photo(photo_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Фото не найдено")
+    indexed = set_manual_caption(store, photo_id, payload.caption)
+    sync_stats(database["id"], store)
+    return CaptionOut(photo_id=photo_id, caption=store.caption_of(photo_id), indexed=indexed)
+
+
+@router.post("/chats/{chat_id}/import", response_model=BotImportOut)
+def import_chat_archive(
+    chat_id: str, _: ServiceAuth, file: UploadFile = File(...)
+) -> BotImportOut:
+    """
+    Импорт группы фото из zip — как «загрузить архив» на сайте. Индексация уходит
+    в ту же очередь задач: бот получает job_id и опрашивает прогресс.
+
+    Проверки архива (zip-бомба, zip-slip, symlink-члены) — общие с сайтом:
+    inspect до распаковки, extract_images по basename. Дублировать их нельзя.
+    """
+    database = _chat_database(chat_id)
+    services.require_writable(database)
+    services.require_idle(database)
+    limits = services.limits_for(database["user_id"])
+    if limits.max_total_bytes == 0:
+        raise HTTPException(status.HTTP_409_CONFLICT, "Достигнут лимит объёма")
+
+    staging = services.tmp_dir(database, f"tg-import-{db.new_id()}")
+    archive_path = staging / "upload.zip"
+    try:
+        data = file.file.read(limits.max_total_bytes + 1)
+        if len(data) > limits.max_total_bytes:
+            raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Архив слишком большой")
+        archive_path.write_bytes(data)
+        # проверка до распаковки: и битый архив, и zip-бомба отсеются раньше,
+        # чем на диск ляжет хоть один распакованный байт
+        count, _size = inspect(archive_path, limits)
+    except ArchiveError as e:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, str(e)) from e
+    except Exception:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+
+    try:
+        services.check_room(database, count)
+    except HTTPException:
+        shutil.rmtree(staging, ignore_errors=True)
+        raise
+
+    def task(context: JobContext) -> str:
+        try:
+            context.set_message("Распаковка архива")
+            extracted = extract_images(archive_path, staging / "files", limits)
+            context.check_cancelled()
+            context.set_message("Индексация")
+            store = store_for(database)
+            outcome = services.index_files(store, extracted.files, context)
+            skipped = len(outcome["skipped"]) + len(extracted.skipped)
+            return f"Добавлено фото: {outcome['added']}, пропущено: {skipped}"
+        finally:
+            shutil.rmtree(staging, ignore_errors=True)
+            sync_stats(database["id"], store_for(database))
+
+    job = job_queue.submit(
+        kind="import_zip", user_id=database["user_id"],
+        database_id=database["id"], function=task, total=count,
+    )
+    return BotImportOut(job_id=job["id"], count=count)
+
+
+@router.get("/chats/{chat_id}/jobs/{job_id}", response_model=JobOut)
+def chat_job(chat_id: str, job_id: str, _: ServiceAuth) -> JobOut:
+    """Статус задачи чата — бот опрашивает прогресс импорта. Чужую задачу не отдаёт."""
+    database = _chat_database(chat_id)
+    job = db.get_job(job_id)
+    if job is None or job["database_id"] != database["id"]:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Задача не найдена")
+    return JobOut.from_row(job, db.queue_position(job_id))
+
+
+@router.get("/chats/{chat_id}/export.zip")
+def export_chat(chat_id: str, _: ServiceAuth) -> StreamingResponse:
+    """Вся база чата одним zip — как «Скачать архив» на сайте. Тот же потоковый сборщик."""
+    database = _chat_database(chat_id)
+    store = store_for(database)
+    manifest = json.dumps(store.manifest(), ensure_ascii=False, indent=2).encode("utf-8")
+    return StreamingResponse(
+        stream_zip(store.iter_export_files(), manifest=manifest),
+        media_type="application/zip",
+        headers={
+            "Content-Disposition": _content_disposition(database["name"]),
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 # --------------------------------------------------------------------------

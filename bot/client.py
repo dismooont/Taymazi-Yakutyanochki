@@ -98,6 +98,27 @@ class SearchApi:
     async def photo_bytes(self, chat_id: int, photo_id: str) -> bytes:
         return await self._request("GET", f"/api/bot/chats/{chat_id}/photos/{photo_id}/file")
 
+    async def delete_photo(self, chat_id: int, photo_id: str) -> None:
+        await self._request("DELETE", f"/api/bot/chats/{chat_id}/photos/{photo_id}")
+
+    async def set_caption(self, chat_id: int, photo_id: str, caption: str) -> dict:
+        return await self._request(
+            "PUT", f"/api/bot/chats/{chat_id}/photos/{photo_id}/caption",
+            json={"caption": caption},
+        )
+
+    async def export_bytes(self, chat_id: int) -> bytes:
+        return await self._request("GET", f"/api/bot/chats/{chat_id}/export.zip")
+
+    async def import_archive(self, chat_id: int, filename: str, content: bytes) -> dict:
+        return await self._request(
+            "POST", f"/api/bot/chats/{chat_id}/import",
+            files={"file": (filename, content, "application/zip")},
+        )
+
+    async def job(self, chat_id: int, job_id: str) -> dict:
+        return await self._request("GET", f"/api/bot/chats/{chat_id}/jobs/{job_id}")
+
     # --- общая демо-база MS COCO (только чтение, доступна из любого чата) ---
 
     async def demo_info(self) -> dict | None:

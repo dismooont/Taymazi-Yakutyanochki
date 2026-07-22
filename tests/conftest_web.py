@@ -27,8 +27,12 @@ def app_env(tmp_path, monkeypatch, holder):
     # Приложение читает .env при запуске, поэтому настройки разработчика могли бы
     # протечь в тесты: с настоящим SERVICE_TOKEN в .env проверка «ручек бота нет,
     # пока токен не задан» проходила бы на чужой машине и падала на этой.
+    # CAPTION_* тоже: с CAPTION_AUTO_ENABLED=1 в .env каждый тест поднимал бы фоновый
+    # воркер и грузил BLIP, а с CAPTION_SEARCH_ENABLED=1 ручная подпись тянула бы
+    # реальный SBERT. В тестах разметка и поиск по подписям проверяются на заглушках.
     for leaking in ("SERVICE_TOKEN", "TELEGRAM_BOT_TOKEN", "TELEGRAM_BOT_USERNAME",
-                    "TELEGRAM_AUTH_ENABLED", "TELEGRAM_PROXY", "PUBLIC_URL"):
+                    "TELEGRAM_AUTH_ENABLED", "TELEGRAM_PROXY", "PUBLIC_URL",
+                    "CAPTION_AUTO_ENABLED", "CAPTION_SEARCH_ENABLED"):
         monkeypatch.delenv(leaking, raising=False)
     monkeypatch.setenv("PUBLIC_URL", "http://localhost:5173")
     # Порог «только похожее» выключаем: у заглушки модели косинусы случайны (и бывают

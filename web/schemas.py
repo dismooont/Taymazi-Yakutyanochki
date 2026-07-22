@@ -197,6 +197,7 @@ class BotChatOut(BaseModel):
     name: str
     photos_count: int
     total_bytes: int
+    captions_count: int = 0  # сколько снимков размечено — бот показывает это в статистике
     created: bool = False
     added: int = 0
     # id только что добавленного снимка: по нему бот сразу просит похожие
@@ -211,11 +212,19 @@ class BotChatOut(BaseModel):
             name=row["name"],
             photos_count=row["photos_count"],
             total_bytes=row["photos_bytes"] + row["index_bytes"],
+            captions_count=row["captions_count"] if "captions_count" in row.keys() else 0,
             created=created,
             added=added,
             photo_id=photo_id,
             skipped=skipped or [],
         )
+
+
+class BotImportOut(BaseModel):
+    """Ответ на импорт архива: задача поставлена, по job_id бот следит за прогрессом."""
+
+    job_id: str
+    count: int
 
 
 class BotSearchRequest(BaseModel):
