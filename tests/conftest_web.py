@@ -41,6 +41,11 @@ def app_env(tmp_path, monkeypatch, holder):
     # фильтрацию проверяют отдельные тесты (tests/test_web_search_threshold.py).
     monkeypatch.setenv("SEARCH_TEXT_MIN_SCORE", "-1")
     monkeypatch.setenv("SEARCH_IMAGE_MIN_SCORE", "-1")
+    # По умолчанию считаем, что текстовой модели нет: иначе set_manual_caption и
+    # поиск по подписям грузили бы реальный SBERT с HuggingFace (сеть, ~90 МБ) —
+    # тесты не должны зависеть от сети и кэша весов. Тесты, которым нужен энкодер,
+    # включают его сами подменой на заглушку.
+    monkeypatch.setattr("web.stores.caption_encoder_available", lambda: False)
     reset_settings()
     login_limiter.clear()
     register_limiter.clear()
