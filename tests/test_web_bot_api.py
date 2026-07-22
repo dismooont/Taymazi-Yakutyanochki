@@ -367,6 +367,40 @@ def test_bot_import_zip(bot_client, started_chat):
     assert bot_client.get(f"/api/bot/chats/{CHAT}").json()["photos_count"] == 4
 
 
+def test_bot_import_telegram_export_layout(bot_client, started_chat):
+    """
+    Бэкфилл канала: экспорт Telegram кладёт медиа по папкам (photos/, video_files/)
+    рядом с result.json. Импорт должен взять только картинки из любых папок и
+    пропустить видео/служебное — распознавать формат экспорта отдельно не нужно.
+    """
+    import io as _io
+    import time
+    import zipfile
+
+    buf = _io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        z.writestr("ChatExport_2024/result.json", b"{}")
+        z.writestr("ChatExport_2024/photos/photo_1@01-01-2024.jpg", _jpeg((1, 2, 3)))
+        z.writestr("ChatExport_2024/photos/photo_2@01-01-2024.jpg", _jpeg((9, 8, 7)))
+        z.writestr("ChatExport_2024/video_files/video_1.mp4", b"not a real video")
+
+    started = bot_client.post(
+        f"/api/bot/chats/{CHAT}/import",
+        files={"file": ("export.zip", buf.getvalue(), "application/zip")},
+    )
+    assert started.status_code == 200, started.text
+    assert started.json()["count"] == 2  # только два фото, видео и json не в счёт
+    job_id = started.json()["job_id"]
+
+    for _ in range(100):
+        job = bot_client.get(f"/api/bot/chats/{CHAT}/jobs/{job_id}").json()
+        if job["status"] in ("done", "error"):
+            break
+        time.sleep(0.2)
+    assert job["status"] == "done", job
+    assert bot_client.get(f"/api/bot/chats/{CHAT}").json()["photos_count"] == 2
+
+
 def test_bot_import_rejects_non_zip(bot_client, started_chat):
     resp = bot_client.post(
         f"/api/bot/chats/{CHAT}/import",

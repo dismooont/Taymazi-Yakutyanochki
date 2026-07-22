@@ -42,6 +42,7 @@ from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
     BufferedInputFile,
     CallbackQuery,
+    ChatMemberUpdated,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
     InputMediaPhoto,
@@ -114,7 +115,10 @@ HELP = (
     f"{BTN_STATS} — сколько снимков накопилось\n"
     f"{BTN_EXPORT} — скачать всю базу одним zip\n\n"
     "Под каждым найденным снимком — 🗑 удалить, ✏️ подпись, 🔍 похожие.\n"
-    "Запрос можно писать по-русски — переведу сам."
+    "Запрос можно писать по-русски — переведу сам.\n\n"
+    "📢 <b>Каналы:</b> добавьте меня админом в канал — заведу базу и буду добавлять "
+    "туда новые фото сам. Старые снимки Telegram боту не отдаёт: выгрузите их "
+    "экспортом канала и загрузите архивом на сайте."
 )
 
 
@@ -404,6 +408,65 @@ def build_dispatcher(api: SearchApi) -> Dispatcher:
             if total:
                 await _safe_edit(status, f"Добавляю: {job['progress_done']}/{total}…")
         await _safe_edit(status, "Импорт идёт дольше обычного — загляните позже через 📊 Статистика.")
+
+    # ------------------------------------------------------------------
+    # Каналы: пост канала приходит как channel_post, а не message, и у него нет
+    # «отправителя». Базу заводит момент добавления бота в канал (my_chat_member,
+    # там есть тот, кто добавил — он и становится владельцем и видит базу на сайте).
+    #
+    # СТАРЫЕ фото канала так не взять: Bot API не отдаёт историю. Их добавляют
+    # разово — выгрузкой канала штатным экспортом Telegram и загрузкой архива на
+    # сайте в базу канала (см. HELP и docs/RUNNING.md).
+    # ------------------------------------------------------------------
+
+    @dispatcher.my_chat_member(F.chat.type == "channel")
+    async def on_added_to_channel(event: ChatMemberUpdated) -> None:
+        status = event.new_chat_member.status
+        if status not in ("administrator", "member"):
+            return  # бота убрали или ограничили — базу не трогаем
+        admin = event.from_user
+        if admin is None:
+            return
+        title = event.chat.title or f"Канал {event.chat.id}"
+        name = " ".join(p for p in (admin.first_name, admin.last_name) if p) or f"tg{admin.id}"
+        try:
+            chat = await api.start_chat(event.chat.id, admin.id, name, title)
+        except ApiError as e:
+            log.warning("канал %s -> отказ: %s", event.chat.id, e.detail)
+            return
+        log.info("канал %s -> база %s (создана=%s)",
+                 event.chat.id, chat["database_id"][:8], chat["created"])
+        # уведомляем добавившего в личке; если он не запускал бота, Telegram не даст
+        # написать первым — это норма, не ошибка
+        try:
+            await event.bot.send_message(
+                admin.id,
+                f"Подключил канал «{title}». Новые фото добавляю в его базу автоматически.\n\n"
+                "Старые снимки Bot API отдать не может. Чтобы добавить их разом: "
+                "выгрузите медиа канала через «Экспорт истории чата» в Telegram Desktop, "
+                "запакуйте в zip и загрузите на сайте — база канала уже видна вам "
+                "после входа через Telegram.",
+            )
+        except Exception:
+            pass
+
+    @dispatcher.channel_post(F.photo)
+    async def on_channel_photo(message: Message, bot: Bot) -> None:
+        # база создаётся при добавлении бота (my_chat_member). Если бот стал админом
+        # ещё до этой версии, my_chat_member не приходил — пусть админ переподключит.
+        if await api.chat_info(message.chat.id) is None:
+            return
+        photo = message.photo[-1]
+        buffer = io.BytesIO()
+        await bot.download(photo, destination=buffer)
+        try:
+            # у поста канала нет отправителя — участника не пишем (пустые id/имя)
+            await api.add_photo(message.chat.id, f"{photo.file_unique_id}.jpg",
+                                buffer.getvalue(), "", "")
+        except ApiError as e:
+            log.warning("канал-фото %s -> отказ: %s", message.chat.id, e.detail)
+            return
+        log.info("канал-фото %s -> добавлено", message.chat.id)
 
     # ------------------------------------------------------------------
     # Свободный текст в личке (без состояния) — тоже поиск

@@ -14,7 +14,7 @@ import datetime
 import pytest
 from aiogram import Bot
 from aiogram.client.default import DefaultBotProperties
-from aiogram.types import Chat, Message, User
+from aiogram.types import Chat, Message, PhotoSize, User
 
 from bot.bot import build_dispatcher
 from bot.client import SearchApi
@@ -95,3 +95,31 @@ async def test_group_text_is_ignored(handlers, bot):
 @pytest.mark.asyncio
 async def test_group_demo_works(handlers, bot):
     assert await _first_match(handlers, bot, _message("/demo кот", "supergroup")) == "on_demo_cmd"
+
+
+# --------------------------------------------------------------------------
+# Каналы: пост канала — отдельный тип апдейта (channel_post), не message
+# --------------------------------------------------------------------------
+
+def _channel_photo() -> Message:
+    return Message(
+        message_id=1,
+        date=datetime.datetime.now(datetime.timezone.utc),
+        chat=Chat(id=-1001, type="channel", title="Канал"),
+        photo=[PhotoSize(file_id="f", file_unique_id="u", width=90, height=90, file_size=1)],
+    )
+
+
+@pytest.mark.asyncio
+async def test_channel_photo_routes_to_channel_handler(bot):
+    """Фото-пост канала должен попасть в обработчик channel_post, а не потеряться."""
+    dispatcher = build_dispatcher(SearchApi("http://example", "token"))
+    found = await _first_match(dispatcher.channel_post.handlers, bot, _channel_photo())
+    assert found == "on_channel_photo"
+
+
+def test_channel_and_membership_handlers_registered():
+    """Каналы держатся на двух отдельных наблюдателях — оба должны быть на месте."""
+    dispatcher = build_dispatcher(SearchApi("http://example", "token"))
+    assert len(dispatcher.channel_post.handlers) == 1
+    assert len(dispatcher.my_chat_member.handlers) == 1
