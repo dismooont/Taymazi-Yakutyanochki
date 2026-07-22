@@ -101,6 +101,7 @@ export function Auth({ onAuth }: { onAuth: (user: User) => void }) {
 
   return (
     <div className="auth stack">
+      <div className="sakha-band" aria-hidden="true" />
       <div>
         <p className="eyebrow">Семантический поиск по фотоархиву</p>
         <h1 className="title">Найдите снимок словами</h1>

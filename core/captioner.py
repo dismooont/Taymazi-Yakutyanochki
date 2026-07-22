@@ -84,14 +84,17 @@ class Captioner:
                     print("BLIP готов")
         return self._model, self._processor
 
-    def caption_images(self, paths: list[str | Path], batch_size: int = 4) -> list[str]:
+    def caption_images(self, paths: list[str | Path | Image.Image], batch_size: int = 4) -> list[str]:
         """
-        Подписи к файлам, по одной на снимок, в том же порядке.
+        Подписи к файлам (или уже открытым картинкам), по одной, в том же порядке.
 
         Нечитаемый файл даёт пустую подпись, а не исключение: разметка идёт пакетно
-        по всей базе, и один битый снимок не должен отменять остальные.
+        по всей базе, и один битый снимок не должен отменять остальные. Принимает и
+        готовый PIL.Image — нужно для подписи картинки-запроса поиска по образцу
+        (web/routers/search.py): она уже в памяти, сохранять на диск незачем.
         """
         import torch
+        from PIL import Image
 
         model, processor = self._load()
         captions: list[str] = []
@@ -99,12 +102,12 @@ class Captioner:
         for start in range(0, len(paths), batch_size):
             chunk = paths[start:start + batch_size]
             images, positions = [], []
-            for offset, path in enumerate(chunk):
+            for offset, item in enumerate(chunk):
                 try:
-                    images.append(open_image(path))
+                    images.append(item if isinstance(item, Image.Image) else open_image(item))
                     positions.append(offset)
                 except Exception as e:  # noqa: BLE001 — причина уходит в лог, снимок пропускаем
-                    print(f"[подпись не создана] {path}: {e}")
+                    print(f"[подпись не создана] {item}: {e}")
 
             produced = [""] * len(chunk)
             if images:
@@ -123,5 +126,5 @@ class Captioner:
 
         return captions
 
-    def caption_one(self, path: str | Path) -> str:
+    def caption_one(self, path: str | Path | Image.Image) -> str:
         return self.caption_images([path])[0]

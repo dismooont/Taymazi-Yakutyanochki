@@ -149,6 +149,14 @@ def add_photo(
     )
 
 
+def _bot_hit(chat_id: str, photo_id: str, score: float, *, ai_generated: bool = False) -> SearchHitOut:
+    url = f"/api/bot/chats/{chat_id}/photos/{photo_id}/file"
+    return SearchHitOut(
+        photo_id=photo_id, score=round(score, 4), thumb_url=url, file_url=url,
+        ai_generated=ai_generated,
+    )
+
+
 @router.post("/chats/{chat_id}/search", response_model=BotSearchResultOut)
 def search_chat(chat_id: str, payload: BotSearchRequest, _: ServiceAuth) -> BotSearchResultOut:
     database = _chat_database(chat_id)
@@ -157,18 +165,17 @@ def search_chat(chat_id: str, payload: BotSearchRequest, _: ServiceAuth) -> BotS
         payload.query.strip(), top_k=payload.top_k, translate=payload.translate,
         min_score=get_settings().search_text_min_score,
     )
-    return BotSearchResultOut(
-        used_query=used_query,
-        results=[
-            SearchHitOut(
-                photo_id=hit.photo_id,
-                score=round(hit.score, 4),
-                thumb_url=f"/api/bot/chats/{chat_id}/photos/{hit.photo_id}/file",
-                file_url=f"/api/bot/chats/{chat_id}/photos/{hit.photo_id}/file",
-            )
-            for hit in hits
-        ],
-    )
+    results = [_bot_hit(chat_id, hit.photo_id, hit.score) for hit in hits]
+
+    # Квота привязана к владельцу базы чата (тому, кто запустил /start) — у
+    # чата нет отдельного «текущего пользователя», а квота на человека, а не
+    # на чат, не даёт исчерпать общий ключ одной активной группой.
+    if not results:
+        generated = services.generate_fallback_photo(database, database["user_id"], used_query or payload.query)
+        if generated:
+            results = [_bot_hit(chat_id, generated["photo_id"], 1.0, ai_generated=True)]
+
+    return BotSearchResultOut(used_query=used_query, results=results)
 
 
 @router.get("/chats/{chat_id}/photos/{photo_id}/similar", response_model=BotSearchResultOut)
@@ -186,15 +193,7 @@ def similar_photos(chat_id: str, photo_id: str, _: ServiceAuth, top_k: int = 5) 
     )
     return BotSearchResultOut(
         used_query="",
-        results=[
-            SearchHitOut(
-                photo_id=hit.photo_id,
-                score=round(hit.score, 4),
-                thumb_url=f"/api/bot/chats/{chat_id}/photos/{hit.photo_id}/file",
-                file_url=f"/api/bot/chats/{chat_id}/photos/{hit.photo_id}/file",
-            )
-            for hit in hits
-        ],
+        results=[_bot_hit(chat_id, hit.photo_id, hit.score) for hit in hits],
     )
 
 

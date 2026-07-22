@@ -90,6 +90,9 @@ class PhotoOut(BaseModel):
     bytes: int
     added_at: str
     caption: str = ""  # подпись снимка (ручная или сгенерированная), может быть пустой
+    liked: bool = False
+    favorited: bool = False
+    ai_generated: bool = False  # снимок сгенерирован YandexART, а не загружен пользователем
 
 
 class PhotoPageOut(BaseModel):
@@ -133,12 +136,31 @@ class SearchTextRequest(BaseModel):
     translate: bool = True
 
 
+class GenerateRequest(BaseModel):
+    """
+    Явный запрос на генерацию — не только когда поиск ничего не нашёл.
+    Порог косинуса не отличает «нашлось по делу» от «нашлось похожее, но не
+    то» (см. .env: у обоих случаев оценка в одном и том же диапазоне), поэтому
+    финальное решение генерировать ли — за человеком, а не за автоматикой.
+    """
+
+    query: str = Field(min_length=1, max_length=500)
+
+
 class SearchHitOut(BaseModel):
     photo_id: str
+    # Нужен ленте (web/feed.py): она собирает снимки сразу из нескольких баз,
+    # и без явного id непонятно, в какую базу слать лайк/избранное/similar.
+    # Обычный поиск внутри одной базы его тоже получает — не жалко. Ручки бота
+    # (web/routers/bot.py) этот id не проставляют — боту он не нужен.
+    database_id: str | None = None
     score: float
     thumb_url: str
     file_url: str
     caption: str = ""  # подпись снимка, если она уже сгенерирована
+    liked: bool = False
+    favorited: bool = False
+    ai_generated: bool = False  # снимок сгенерирован YandexART, а не найден в базе
 
 
 class CaptionHitOut(BaseModel):
@@ -246,3 +268,41 @@ class QuotaOut(BaseModel):
     bytes_used: int
     bytes_limit: int
     photos_per_database_limit: int
+
+
+# --------------------------------------------------------------------------
+# Лайки, избранное, профиль
+# --------------------------------------------------------------------------
+
+class ProfilePhotoOut(BaseModel):
+    """
+    Отмеченное фото на странице профиля — вместе с базой-источником, потому что
+    отметки собираются со всех баз пользователя (свои, демо, чаты), а не с одной.
+    """
+
+    database_id: str
+    database_name: str
+    database_kind: str
+    photo_id: str
+    marked_at: str
+    thumb_url: str
+    file_url: str
+
+    @classmethod
+    def from_row(cls, row: dict) -> "ProfilePhotoOut":
+        base = f"/api/databases/{row['database_id']}/photos/{row['photo_id']}"
+        return cls(
+            database_id=row["database_id"],
+            database_name=row["database_name"],
+            database_kind=row["database_kind"],
+            photo_id=row["photo_id"],
+            marked_at=row["created_at"],
+            thumb_url=f"{base}/thumb",
+            file_url=f"{base}/file",
+        )
+
+
+class ProfileOut(BaseModel):
+    user: UserOut
+    liked: list[ProfilePhotoOut] = Field(default_factory=list)
+    favorited: list[ProfilePhotoOut] = Field(default_factory=list)

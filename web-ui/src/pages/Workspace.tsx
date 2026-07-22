@@ -22,6 +22,7 @@ export function Workspace() {
   const [galleryTotal, setGalleryTotal] = useState(0)
   const [jobId, setJobId] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  const [generating, setGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
 
@@ -35,9 +36,13 @@ export function Workspace() {
       setGalleryTotal(page.total)
       const tiles = page.items.map((photo) => ({
         photoId: photo.photo_id,
+        databaseId: id,
         thumbUrl: api.thumbUrl(id, photo.photo_id),
         fileUrl: api.fileUrl(id, photo.photo_id),
         caption: photo.caption,
+        liked: photo.liked,
+        favorited: photo.favorited,
+        aiGenerated: photo.ai_generated,
       }))
       setGallery((current) => (offset === 0 ? tiles : [...current, ...tiles]))
     },
@@ -95,6 +100,26 @@ export function Workspace() {
     }
   }
 
+  const generatePhoto = async () => {
+    const prompt = (result?.used_query || query).trim()
+    if (!prompt) return
+    setGenerating(true)
+    setError(null)
+    try {
+      const generated = await api.generate(id, prompt)
+      const newHit = generated.results[0]
+      if (!newHit) return
+      // Заменяем выдачу целиком: человек явно сказал, что найденное не то,
+      // держать рядом старые нерелевантные карточки — только сбивать с толку.
+      setResult({ used_query: generated.used_query, results: [newHit], captions: [], fused: false })
+      setToast('Сгенерировано')
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Не удалось сгенерировать снимок')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
   const addPhotos = async (files: File[]) => {
     setBusy(true)
     setError(null)
@@ -140,6 +165,48 @@ export function Workspace() {
     }
   }
 
+  // Лайк/избранное — независимые отметки; меняем локально сразу (отклик без
+  // ожидания сети) и синхронизируем и галерею, и результаты поиска: один и тот
+  // же снимок может быть виден в обеих выдачах одновременно.
+  const applyMark = (photoId: string, patch: Partial<Tile>) => {
+    const apply = (tile: Tile) => (tile.photoId === photoId ? { ...tile, ...patch } : tile)
+    setGallery((current) => current.map(apply))
+    setResult((current) =>
+      current
+        ? {
+            ...current,
+            results: current.results.map((h) =>
+              h.photo_id === photoId ? { ...h, ...patch } : h,
+            ),
+          }
+        : current,
+    )
+  }
+
+  const toggleLike = async (tile: Tile) => {
+    const next = !tile.liked
+    applyMark(tile.photoId, { liked: next })
+    try {
+      await (next ? api.like(tile.databaseId, tile.photoId) : api.unlike(tile.databaseId, tile.photoId))
+    } catch {
+      applyMark(tile.photoId, { liked: tile.liked })
+      setError('Не удалось сохранить лайк')
+    }
+  }
+
+  const toggleFavorite = async (tile: Tile) => {
+    const next = !tile.favorited
+    applyMark(tile.photoId, { favorited: next })
+    try {
+      await (next
+        ? api.favorite(tile.databaseId, tile.photoId)
+        : api.unfavorite(tile.databaseId, tile.photoId))
+    } catch {
+      applyMark(tile.photoId, { favorited: tile.favorited })
+      setError('Не удалось сохранить избранное')
+    }
+  }
+
   const removePhoto = async (photoId: string) => {
     setGallery((current) => current.filter((tile) => tile.photoId !== photoId))
     setResult((current) =>
@@ -161,17 +228,21 @@ export function Workspace() {
   const searchTiles: Tile[] =
     result?.results.map((hit) => ({
       photoId: hit.photo_id,
+      databaseId: id,
       thumbUrl: hit.thumb_url,
       fileUrl: hit.file_url,
       score: hit.score,
       caption: hit.caption,
+      liked: hit.liked,
+      favorited: hit.favorited,
+      aiGenerated: hit.ai_generated,
     })) ?? []
 
   return (
     <div className="stack" style={{ gap: 28 }}>
       <header className="masthead">
         <div>
-          <Link to="/" className="eyebrow" style={{ textDecoration: 'none' }}>
+          <Link to="/databases" className="eyebrow" style={{ textDecoration: 'none' }}>
             ← Все базы
           </Link>
           <h1 className="title" style={{ marginTop: 6 }}>
@@ -248,7 +319,17 @@ export function Workspace() {
 
             <div className="console__alt">
               <span>Или найдите похожие по образцу:</span>
-              <Dropzone accept="image/*" variant="compact" onFiles={searchByImage}>
+              <Dropzone
+                accept="image/*"
+                variant="compact"
+                onFiles={searchByImage}
+                onEmptyDrop={() =>
+                  setError(
+                    'Похоже, вы перетащили фото прямо со страницы — так браузер не передаёт файл. ' +
+                      'Перетащите файл с компьютера, или откройте нужный снимок (клик по нему) и посмотрите вкладку «Похожие».',
+                  )
+                }
+              >
                 Перетащить снимок
               </Dropzone>
             </div>
@@ -283,8 +364,23 @@ export function Workspace() {
               tiles={searchTiles}
               onRemove={database.read_only ? undefined : removePhoto}
               onEditCaption={database.read_only ? undefined : editCaption}
+              onToggleLike={toggleLike}
+              onToggleFavorite={toggleFavorite}
               fused={result?.fused ?? false}
             />
+          )}
+
+          {result && !database.read_only && (
+            <div className="console__alt" style={{ borderTop: 'none', paddingTop: 0 }}>
+              <span>
+                {searchTiles.length === 0
+                  ? 'Совсем не нашлось?'
+                  : 'Не то, что искали? CLIP не проверяет отношения между предметами на фото — можно попросить нарисовать нужное.'}
+              </span>
+              <button type="button" className="btn" disabled={generating} onClick={generatePhoto}>
+                {generating ? 'Генерируем…' : 'Сгенерировать фото по запросу'}
+              </button>
+            </div>
           )}
 
           {result && result.captions.length > 0 && (
@@ -320,6 +416,8 @@ export function Workspace() {
                 tiles={gallery}
                 onRemove={database.read_only ? undefined : removePhoto}
                 onEditCaption={database.read_only ? undefined : editCaption}
+                onToggleLike={toggleLike}
+                onToggleFavorite={toggleFavorite}
               />
               {gallery.length < galleryTotal && (
                 <button

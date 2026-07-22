@@ -18,7 +18,7 @@ from core.store import PROJECT_ROOT, IndexStore
 from web import db
 from web.archive import ArchiveError, ArchiveLimits, extract_images, inspect
 from web.config import get_settings
-from web.deps import OwnedDatabase, WritableDatabase
+from web.deps import CurrentUser, OwnedDatabase, WritableDatabase
 from web import services
 from web.jobs import JobContext, job_queue
 from web.schemas import (
@@ -72,15 +72,25 @@ def _save_upload(upload: UploadFile, target: Path, max_bytes: int) -> int:
 # --------------------------------------------------------------------------
 
 @router.get("/photos", response_model=PhotoPageOut)
-def list_photos(database: OwnedDatabase, offset: int = 0, limit: int = 60) -> PhotoPageOut:
+def list_photos(
+    database: OwnedDatabase, user: CurrentUser, offset: int = 0, limit: int = 60
+) -> PhotoPageOut:
     store = store_for(database)
     limit = max(1, min(limit, 200))
     photos = store.list_photos(offset=max(0, offset), limit=limit)
+    photo_ids = [p.photo_id for p in photos]
+    liked = db.liked_photo_ids(user["id"], database["id"], photo_ids)
+    favorited = db.favorited_photo_ids(user["id"], database["id"], photo_ids)
+    generated = db.ai_generated_photo_ids(database["id"], photo_ids)
     return PhotoPageOut(
         total=len(store),
         offset=offset,
         items=[
-            PhotoOut(photo_id=p.photo_id, bytes=p.bytes, added_at=p.added_at, caption=p.caption)
+            PhotoOut(
+                photo_id=p.photo_id, bytes=p.bytes, added_at=p.added_at, caption=p.caption,
+                liked=p.photo_id in liked, favorited=p.photo_id in favorited,
+                ai_generated=p.photo_id in generated,
+            )
             for p in photos
         ],
     )
@@ -257,6 +267,49 @@ def set_caption(
 
 
 # --------------------------------------------------------------------------
+# Лайки и избранное
+# --------------------------------------------------------------------------
+# Отметка личная, не меняет саму базу — поэтому OwnedDatabase (даёт доступ и
+# демо-базе, и базам чатов, где пользователь состоит), а не WritableDatabase.
+
+def _existing_photo(database: dict, photo_id: str) -> None:
+    if store_for(database).get_photo(photo_id) is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Фото не найдено")
+
+
+@router.put("/photos/{photo_id}/like", status_code=status.HTTP_204_NO_CONTENT)
+def like_photo(database: OwnedDatabase, user: CurrentUser, photo_id: str) -> None:
+    _existing_photo(database, photo_id)
+    db.like_photo(user["id"], database["id"], photo_id)
+
+
+@router.delete("/photos/{photo_id}/like", status_code=status.HTTP_204_NO_CONTENT)
+def unlike_photo(database: OwnedDatabase, user: CurrentUser, photo_id: str) -> None:
+    db.unlike_photo(user["id"], database["id"], photo_id)
+
+
+@router.put("/photos/{photo_id}/favorite", status_code=status.HTTP_204_NO_CONTENT)
+def favorite_photo(database: OwnedDatabase, user: CurrentUser, photo_id: str) -> None:
+    _existing_photo(database, photo_id)
+    db.favorite_photo(user["id"], database["id"], photo_id)
+
+
+@router.delete("/photos/{photo_id}/favorite", status_code=status.HTTP_204_NO_CONTENT)
+def unfavorite_photo(database: OwnedDatabase, user: CurrentUser, photo_id: str) -> None:
+    db.unfavorite_photo(user["id"], database["id"], photo_id)
+
+
+# --------------------------------------------------------------------------
+# Просмотр — сид для персональной ленты (web/feed.py), не для UI-состояния
+# --------------------------------------------------------------------------
+
+@router.post("/photos/{photo_id}/view", status_code=status.HTTP_204_NO_CONTENT)
+def view_photo(database: OwnedDatabase, user: CurrentUser, photo_id: str) -> None:
+    _existing_photo(database, photo_id)
+    db.log_photo_view(user["id"], database["id"], photo_id)
+
+
+# --------------------------------------------------------------------------
 # Удаление
 # --------------------------------------------------------------------------
 
@@ -265,6 +318,7 @@ def delete_photo(database: WritableDatabase, photo_id: str) -> None:
     store = store_for(database)
     if store.delete_photos([photo_id]) == 0:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Фото не найдено")
+    db.forget_photo_marks(database["id"], [photo_id])
     sync_stats(database["id"], store)
 
 
@@ -272,5 +326,6 @@ def delete_photo(database: WritableDatabase, photo_id: str) -> None:
 def delete_photos(database: WritableDatabase, payload: DeletePhotosRequest) -> dict:
     store = store_for(database)
     removed = store.delete_photos(payload.photo_ids)
+    db.forget_photo_marks(database["id"], payload.photo_ids)
     sync_stats(database["id"], store)
     return {"deleted": removed}
