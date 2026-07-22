@@ -21,7 +21,12 @@ OPERATION_URL = "https://operation.api.cloud.yandex.net/operations/{operation_id
 
 REQUEST_TIMEOUT = 20.0
 POLL_INTERVAL = 2.0
-POLL_TIMEOUT = 60.0
+# Было 60 с — на практике сеть до operation.api.cloud.yandex.net временами
+# держит read timeout по несколько раз подряд (проверено: 12 неудачных
+# опросов подряд, 13-й прошёл). При REQUEST_TIMEOUT=20 с старое значение
+# давало от силы 2-3 попытки, прежде чем сдаться. 180 с — тот же запас,
+# что реально потребовался на практике, плюс небольшой резерв.
+POLL_TIMEOUT = 180.0
 
 
 class YandexArtError(RuntimeError):

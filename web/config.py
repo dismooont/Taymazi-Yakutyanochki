@@ -76,6 +76,8 @@ class Settings:
     yandex_api_key: str
     yandex_folder_id: str
     yandex_generations_per_user_day: int
+    omdb_api_key: str
+    lastfm_api_key: str
 
     @property
     def db_path(self) -> Path:
@@ -124,6 +126,11 @@ class Settings:
     def photo_generation_enabled(self) -> bool:
         """Оба значения обязательны: без folder_id ключ YandexART не работает."""
         return bool(self.yandex_api_key and self.yandex_folder_id)
+
+    @property
+    def media_enabled(self) -> bool:
+        """Хотя бы один ключ — вкладка показывает то, что может, а не всё или ничего."""
+        return bool(self.omdb_api_key or self.lastfm_api_key)
 
 
 @lru_cache(maxsize=1)
@@ -183,6 +190,10 @@ def get_settings() -> Settings:
         yandex_api_key=os.environ.get("YANDEX_API_KEY", "").strip(),
         yandex_folder_id=os.environ.get("YANDEX_FOLDER_ID", "").strip(),
         yandex_generations_per_user_day=_int("YANDEX_GENERATIONS_PER_USER_DAY", 5),
+        # Вкладка «Фильмы и музыка» (web/routers/media.py) — оба необязательны,
+        # каждый включает свой раздел независимо от другого.
+        omdb_api_key=os.environ.get("OMDB_API_KEY", "").strip(),
+        lastfm_api_key=os.environ.get("LASTFM_API_KEY", "").strip(),
     )
 
 

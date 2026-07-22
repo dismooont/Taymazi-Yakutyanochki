@@ -8,6 +8,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { ApiError, api, type PublicConfig, type TelegramPayload, type User } from '../api'
+import { AuroraScene } from '../AuroraScene'
 
 type Mode = 'login' | 'register'
 
@@ -100,8 +101,10 @@ export function Auth({ onAuth }: { onAuth: (user: User) => void }) {
   }
 
   return (
-    <div className="auth stack">
-      <div className="sakha-band" aria-hidden="true" />
+    <div className="auth-page">
+      <AuroraScene />
+      <div className="auth stack">
+        <div className="sakha-band" aria-hidden="true" />
       <div>
         <p className="eyebrow">Семантический поиск по фотоархиву</p>
         <h1 className="title">Найдите снимок словами</h1>
@@ -192,11 +195,12 @@ export function Auth({ onAuth }: { onAuth: (user: User) => void }) {
         </div>
       )}
 
-      <p className="note">
-        {config?.telegram_auth
-          ? 'Пароль восстановить не получится: почтовый сервер для писем со сбросом не подключён. Привяжите Telegram — через него можно будет войти.'
-          : 'Пароль восстановить не получится: почтовый сервер для писем со сбросом не подключён. Запишите пароль в надёжном месте.'}
-      </p>
+        <p className="note">
+          {config?.telegram_auth
+            ? 'Пароль восстановить не получится: почтовый сервер для писем со сбросом не подключён. Привяжите Telegram — через него можно будет войти.'
+            : 'Пароль восстановить не получится: почтовый сервер для писем со сбросом не подключён. Запишите пароль в надёжном месте.'}
+        </p>
+      </div>
     </div>
   )
 }

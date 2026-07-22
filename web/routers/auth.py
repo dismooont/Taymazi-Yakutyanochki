@@ -8,9 +8,13 @@ docs/WEB_PLAN.md, раздел 7.1: одинаковый текст ошибки
 
 from __future__ import annotations
 
+import io
+from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Cookie, HTTPException, Request, Response, status
+from fastapi import APIRouter, Cookie, File, HTTPException, Request, Response, UploadFile, status
+from fastapi.responses import FileResponse
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from web import db, telegram
 from web.config import get_settings
@@ -46,7 +50,16 @@ def _user_out(user: dict[str, Any]) -> UserOut:
         display_name=user["display_name"],
         has_password=bool(user["password_hash"]),
         has_telegram=_has_telegram(user["id"]),
+        # Указывает на /api/me/avatar, а не на аватар конкретно этого id: ручка
+        # всегда отдаёт аватар звонящего. _user_out сейчас и вызывается только
+        # для «себя» (регистрация/вход/смена пароля) — если появится показ
+        # чужих профилей, понадобится отдельная публичная ручка по user_id.
+        avatar_url="/api/me/avatar" if avatar_path(user["id"]).exists() else None,
     )
+
+
+def avatar_path(user_id: str) -> Path:
+    return get_settings().user_dir(user_id) / "avatar.webp"
 
 
 def _has_telegram(user_id: str) -> bool:
@@ -238,4 +251,53 @@ def change_password(payload: PasswordChangeRequest, request: Request, user: Curr
     # смена пароля разлогинивает остальные устройства: если пароль меняют из-за утечки,
     # украденная сессия должна умереть вместе с ним
     db.delete_user_sessions(user["id"], keep_token_hash=request.state.session_token_hash)
+    return _user_out(db.get_user(user["id"]))
+
+
+# --------------------------------------------------------------------------
+# Аватар
+# --------------------------------------------------------------------------
+
+AVATAR_SIZE = 256
+MAX_AVATAR_BYTES = 5 * 1024 ** 2
+
+
+@me_router.get("/avatar")
+def get_own_avatar(user: CurrentUser) -> FileResponse:
+    path = avatar_path(user["id"])
+    if not path.exists():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Аватар не задан")
+    # приватный кэш и покороче, чем у фото базы: аватар меняют, а имя файла
+    # (avatar.webp) при этом не меняется, в отличие от снимков по хешу содержимого
+    return FileResponse(path, headers={"Cache-Control": "private, max-age=300"})
+
+
+@me_router.post("/avatar", response_model=UserOut)
+def upload_avatar(user: CurrentUser, file: UploadFile = File(...)) -> UserOut:
+    raw = file.file.read(MAX_AVATAR_BYTES + 1)
+    if len(raw) > MAX_AVATAR_BYTES:
+        raise HTTPException(status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, "Слишком большой файл")
+    try:
+        image = ImageOps.exif_transpose(Image.open(io.BytesIO(raw))).convert("RGB")
+    except (UnidentifiedImageError, OSError, ValueError) as e:
+        raise HTTPException(
+            status.HTTP_422_UNPROCESSABLE_CONTENT, "Файл не является изображением"
+        ) from e
+
+    # квадратная обрезка по центру — в интерфейсе аватар всегда круглый,
+    # некруглый исходник (панорама, портрет) иначе съезжал бы вбок
+    side = min(image.size)
+    left, top = (image.width - side) // 2, (image.height - side) // 2
+    image = image.crop((left, top, left + side, top + side))
+    image.thumbnail((AVATAR_SIZE, AVATAR_SIZE))
+
+    path = avatar_path(user["id"])
+    path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(path, "WEBP", quality=85)
+    return _user_out(db.get_user(user["id"]))
+
+
+@me_router.delete("/avatar", response_model=UserOut)
+def delete_avatar(user: CurrentUser) -> UserOut:
+    avatar_path(user["id"]).unlink(missing_ok=True)
     return _user_out(db.get_user(user["id"]))

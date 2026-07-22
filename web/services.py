@@ -307,6 +307,55 @@ def filter_by_image_caption(hits: list[SearchHit], query_caption: str | None) ->
     return [hit for hit in hits if _caption_matches_query(hit.caption, {main_word})]
 
 
+# --------------------------------------------------------------------------
+# Темы для вкладки «Фильмы и музыка» (web/routers/media.py) — те же источники,
+# что и у ленты (web/feed.py): недавние запросы и то, что человек лайкнул,
+# добавил в избранное или просмотрел. Разница в том, что ленте нужны похожие
+# ФОТО (эмбеддинг), а здесь — просто английские слова-темы для OMDb/Last.fm.
+# --------------------------------------------------------------------------
+
+# Цвет предмета на фото — не тема для подбора фильма или музыки («red»/«yellow»
+# ничего не говорят про жанр или настроение), а в подписях BLIP встречается
+# почти в каждой второй строке («a red car», «a yellow submarine»). В отличие
+# от _STOPWORDS эти слова НЕ трогают поиск (там цвет — осмысленная деталь
+# запроса), поэтому список отдельный и используется только здесь.
+_THEME_SKIP_WORDS = {
+    "red", "yellow", "blue", "green", "black", "white", "brown", "orange",
+    "pink", "purple", "gray", "grey", "beige", "golden", "silver", "dark", "light",
+}
+
+
+def recent_theme_keywords(user_id: str, limit: int = 6) -> list[str]:
+    """
+    Различимые ключевые слова, самые свежие впереди. Запросы идут первыми:
+    их выбрал сам человек, а не BLIP по случайной детали сцены на фото.
+    """
+    databases = {d["id"]: d for d in db.list_databases(user_id)}
+    seen: set[str] = set()
+    words: list[str] = []
+
+    def add_words(text: str) -> None:
+        for w in _words_in_order(text):
+            if w in _THEME_SKIP_WORDS:
+                continue
+            if w not in seen:
+                seen.add(w)
+                words.append(w)
+
+    for row in db.recent_queries(user_id, limit=8):
+        add_words(row["used_query"])
+
+    for row in db.recent_interacted_photos(user_id, limit=15):
+        database = databases.get(row["database_id"])
+        if database is None:
+            continue
+        photo = store_for(database).get_photo(row["photo_id"])
+        if photo and photo.caption:
+            add_words(photo.caption)
+
+    return words[:limit]
+
+
 def generated_hit_out(database: dict, photo_id: str) -> SearchHitOut:
     """Единственный результат, когда обычный поиск ничего не нашёл и подключилась генерация."""
     base = f"/api/databases/{database['id']}/photos"

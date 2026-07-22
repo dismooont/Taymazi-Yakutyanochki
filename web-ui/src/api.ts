@@ -17,6 +17,7 @@ export interface User {
   display_name: string
   has_password: boolean
   has_telegram: boolean
+  avatar_url: string | null
 }
 
 export interface Database {
@@ -133,6 +134,38 @@ export interface Profile {
   favorited: ProfilePhoto[]
 }
 
+export interface Movie {
+  title: string
+  year: string
+  imdb_id: string
+  poster_url: string | null
+}
+
+export interface Track {
+  name: string
+  artist: string
+  url: string
+}
+
+export interface Artist {
+  name: string
+  url: string
+  image_url: string | null
+}
+
+export interface MediaTheme {
+  theme: string
+  movies: Movie[]
+  tracks: Track[]
+  artists: Artist[]
+}
+
+export interface Media {
+  /** false — ни один ключ каталога не настроен на сервере, вкладку показывать незачем */
+  enabled: boolean
+  themes: MediaTheme[]
+}
+
 async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`/api${path}`, {
     credentials: 'include',
@@ -179,6 +212,13 @@ export const api = {
   me: () => request<User>('/me'),
   telegramAuth: (payload: TelegramPayload) => json<User>('/auth/telegram', 'POST', payload),
   unlinkTelegram: () => request<User>('/me/identities/telegram', { method: 'DELETE' }),
+  avatarUrl: () => `/api/me/avatar?t=${Date.now()}`,
+  uploadAvatar: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return request<User>('/me/avatar', { method: 'POST', body: form })
+  },
+  deleteAvatar: () => request<User>('/me/avatar', { method: 'DELETE' }),
   register: (login: string, password: string, display_name?: string) =>
     json<User>('/auth/register', 'POST', { login, password, display_name }),
   login: (login: string, password: string) => json<User>('/auth/login', 'POST', { login, password }),
@@ -229,10 +269,13 @@ export const api = {
   similar: (id: string, photoId: string, top_k = 12) =>
     request<SearchResult>(`/databases/${id}/search/similar/${photoId}?top_k=${top_k}`),
 
+  photo: (id: string, photoId: string) => request<Photo>(`/databases/${id}/photos/${photoId}/info`),
+
   viewPhoto: (id: string, photoId: string) =>
     request<void>(`/databases/${id}/photos/${photoId}/view`, { method: 'POST' }),
 
   feed: () => request<SearchResult>('/feed'),
+  media: () => request<Media>('/media'),
 
   job: (jobId: string) => request<Job>(`/jobs/${jobId}`),
   jobs: (databaseId: string) => request<Job[]>(`/jobs?database_id=${databaseId}`),

@@ -96,6 +96,22 @@ def list_photos(
     )
 
 
+@router.get("/photos/{photo_id}/info", response_model=PhotoOut)
+def get_photo_info(database: OwnedDatabase, user: CurrentUser, photo_id: str) -> PhotoOut:
+    """Один снимок — для отдельной страницы фото (не модалки), а не всей галереи."""
+    store = store_for(database)
+    photo = store.get_photo(photo_id)
+    if photo is None:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Фото не найдено")
+    liked = db.liked_photo_ids(user["id"], database["id"], [photo_id])
+    favorited = db.favorited_photo_ids(user["id"], database["id"], [photo_id])
+    generated = db.ai_generated_photo_ids(database["id"], [photo_id])
+    return PhotoOut(
+        photo_id=photo.photo_id, bytes=photo.bytes, added_at=photo.added_at, caption=photo.caption,
+        liked=photo_id in liked, favorited=photo_id in favorited, ai_generated=photo_id in generated,
+    )
+
+
 # --------------------------------------------------------------------------
 # Отдача файлов
 # --------------------------------------------------------------------------

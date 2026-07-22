@@ -313,9 +313,15 @@ export function Workspace() {
                 aria-label="Описание снимка"
               />
               <button type="submit" className="btn btn--primary" disabled={busy}>
-                Найти
+                {busy ? 'Ищем…' : 'Найти'}
               </button>
             </div>
+
+            {busy && (
+              <p className="note" style={{ marginTop: 10 }}>
+                Если точных совпадений нет, подключится генерация — это может занять до минуты.
+              </p>
+            )}
 
             <div className="console__alt">
               <span>Или найдите похожие по образцу:</span>

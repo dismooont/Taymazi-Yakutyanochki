@@ -32,6 +32,7 @@ class UserOut(BaseModel):
     display_name: str
     has_password: bool
     has_telegram: bool
+    avatar_url: str | None = None
 
 
 # --------------------------------------------------------------------------
@@ -306,3 +307,40 @@ class ProfileOut(BaseModel):
     user: UserOut
     liked: list[ProfilePhotoOut] = Field(default_factory=list)
     favorited: list[ProfilePhotoOut] = Field(default_factory=list)
+
+
+# --------------------------------------------------------------------------
+# Фильмы и музыка (web/routers/media.py)
+# --------------------------------------------------------------------------
+
+class MovieOut(BaseModel):
+    title: str
+    year: str
+    imdb_id: str
+    poster_url: str | None = None
+
+
+class TrackOut(BaseModel):
+    name: str
+    artist: str
+    url: str
+
+
+class ArtistOut(BaseModel):
+    name: str
+    url: str
+    image_url: str | None = None
+
+
+class MediaThemeOut(BaseModel):
+    """Одна тема (ключевое слово из истории пользователя) и подборка по ней."""
+
+    theme: str
+    movies: list[MovieOut] = Field(default_factory=list)
+    tracks: list[TrackOut] = Field(default_factory=list)
+    artists: list[ArtistOut] = Field(default_factory=list)
+
+
+class MediaOut(BaseModel):
+    enabled: bool
+    themes: list[MediaThemeOut] = Field(default_factory=list)

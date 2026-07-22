@@ -4,10 +4,10 @@
  * отдельных списка, а не один с фильтром.
  */
 
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ApiError, api, type Profile as ProfileData, type ProfilePhoto } from '../api'
-import { Empty, PhotoGrid, type Tile } from '../components'
+import { ApiError, api, type Profile as ProfileData, type ProfilePhoto, type User } from '../api'
+import { Avatar, Empty, PhotoGrid, type Tile } from '../components'
 
 const KIND_LABEL: Record<ProfilePhoto['database_kind'], string> = {
   personal: '',
@@ -35,9 +35,11 @@ function toTile(photo: ProfilePhoto, mark: 'liked' | 'favorited'): Tile {
   }
 }
 
-export function Profile() {
+export function Profile({ onUserUpdate }: { onUserUpdate?: (user: User) => void }) {
   const [data, setData] = useState<ProfileData | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [avatarBusy, setAvatarBusy] = useState(false)
+  const avatarInput = useRef<HTMLInputElement>(null)
 
   const refresh = useCallback(async () => {
     try {
@@ -50,6 +52,38 @@ export function Profile() {
   useEffect(() => {
     refresh()
   }, [refresh])
+
+  const applyUser = (user: User) => {
+    setData((current) => (current ? { ...current, user } : current))
+    onUserUpdate?.(user)
+  }
+
+  const uploadAvatar = async (files: FileList | null) => {
+    const file = files?.[0]
+    if (!file) return
+    setAvatarBusy(true)
+    setError(null)
+    try {
+      applyUser(await api.uploadAvatar(file))
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Не удалось загрузить фото')
+    } finally {
+      setAvatarBusy(false)
+      if (avatarInput.current) avatarInput.current.value = ''
+    }
+  }
+
+  const removeAvatar = async () => {
+    setAvatarBusy(true)
+    setError(null)
+    try {
+      applyUser(await api.deleteAvatar())
+    } catch (e) {
+      setError(e instanceof ApiError ? e.message : 'Не удалось убрать фото')
+    } finally {
+      setAvatarBusy(false)
+    }
+  }
 
   if (!data) {
     return <div className="empty">{error ?? 'Загружаем профиль…'}</div>
@@ -88,7 +122,25 @@ export function Profile() {
 
   return (
     <div className="stack" style={{ gap: 28 }}>
-      <header className="masthead">
+      <header className="masthead profile-head">
+        <button
+          type="button"
+          className="profile-head__avatar"
+          disabled={avatarBusy}
+          onClick={() => avatarInput.current?.click()}
+          aria-label="Изменить фото профиля"
+        >
+          <Avatar user={data.user} size={96} />
+          <span className="profile-head__avatar-edit">{avatarBusy ? '…' : 'Изменить'}</span>
+        </button>
+        <input
+          ref={avatarInput}
+          type="file"
+          accept="image/*"
+          hidden
+          onChange={(event) => uploadAvatar(event.target.files)}
+        />
+
         <div>
           <Link to="/databases" className="eyebrow" style={{ textDecoration: 'none' }}>
             ← Все базы
@@ -96,6 +148,17 @@ export function Profile() {
           <h1 className="title" style={{ marginTop: 6 }}>
             {data.user.display_name}
           </h1>
+          {data.user.avatar_url && (
+            <button
+              type="button"
+              className="btn btn--quiet"
+              style={{ marginTop: 8 }}
+              disabled={avatarBusy}
+              onClick={removeAvatar}
+            >
+              Убрать фото
+            </button>
+          )}
         </div>
       </header>
 

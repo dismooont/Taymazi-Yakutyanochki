@@ -1,8 +1,41 @@
 /** Общие элементы интерфейса. */
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { api, type Job } from './api'
+import { Link } from 'react-router-dom'
+import { api, type Job, type User } from './api'
 import { formatScore } from './format'
+
+/* ------------------------------------------------------------------ */
+/* Аватар пользователя                                                 */
+/* ------------------------------------------------------------------ */
+
+/** Фото профиля — или инициал имени на цветном кружке, если фото не задано. */
+export function Avatar({ user, size = 32 }: { user: User; size?: number }) {
+  const [broken, setBroken] = useState(false)
+  const initial = (user.display_name || '?').trim().charAt(0).toUpperCase()
+
+  if (!user.avatar_url || broken) {
+    return (
+      <span
+        className="avatar avatar--fallback"
+        style={{ width: size, height: size, fontSize: size * 0.44 }}
+        aria-hidden="true"
+      >
+        {initial}
+      </span>
+    )
+  }
+
+  return (
+    <img
+      className="avatar"
+      style={{ width: size, height: size }}
+      src={api.avatarUrl()}
+      alt=""
+      onError={() => setBroken(true)}
+    />
+  )
+}
 
 /* ------------------------------------------------------------------ */
 /* Прогресс фоновой задачи                                             */
@@ -406,8 +439,6 @@ export function PhotoGrid({
   /** Выдача получена слиянием с поиском по подписям — оценка тогда не косинус. */
   fused?: boolean
 }) {
-  const [zoomed, setZoomed] = useState<Tile | null>(null)
-
   // Обычная оценка — косинус, он неотрицателен, и полоску можно мерить от нуля.
   // Оценка слияния — взвешенная сумма отклонений от среднего, и она свободно
   // уходит в минус: у половины выдачи она отрицательна по построению. Меряя её
@@ -419,33 +450,24 @@ export function PhotoGrid({
   const span = best - floor
   const fill = (score: number) => (span > 0 ? ((score - floor) / span) * 100 : 0)
 
-  useEffect(() => {
-    if (!zoomed) return
-    const onKey = (event: KeyboardEvent) => event.key === 'Escape' && setZoomed(null)
-    window.addEventListener('keydown', onKey)
-    return () => window.removeEventListener('keydown', onKey)
-  }, [zoomed])
-
-  // Открытый снимок мог с тех пор поменяться в исходном списке (лайк/избранное
-  // из этой же сетки) — берём свежую версию оттуда, если она там ещё есть.
-  const zoomedLive = zoomed
-    ? tiles.find((t) => t.photoId === zoomed.photoId && t.databaseId === zoomed.databaseId) ?? zoomed
-    : null
-
   return (
-    <>
-      <div className="grid">
-        {tiles.map((tile) => (
-          <figure className="card" key={tile.photoId} style={{ margin: 0 }}>
-            <button
-              type="button"
-              className="card__frame"
-              onClick={() => setZoomed(tile)}
-              aria-label="Открыть снимок целиком"
-            >
-              <img src={tile.thumbUrl} alt="" loading="lazy" />
-              {tile.aiGenerated && <span className="card__badge">Сгенерировано ИИ</span>}
-            </button>
+    <div className="grid">
+      {tiles.map((tile) => (
+        <figure className="card" key={tile.photoId} style={{ margin: 0 }}>
+          {/*
+            Открытие фото — переход на его собственную страницу
+            (pages/Photo.tsx), а не оверлей: у снимка тогда есть адрес,
+            «назад» браузера работает предсказуемо, а длинная лента не
+            остаётся зажатой позади модалки.
+          */}
+          <Link
+            to={`/db/${tile.databaseId}/photo/${tile.photoId}`}
+            className="card__frame"
+            aria-label="Открыть снимок целиком"
+          >
+            <img src={tile.thumbUrl} alt="" loading="lazy" />
+            {tile.aiGenerated && <span className="card__badge">Сгенерировано ИИ</span>}
+          </Link>
 
             {(onToggleLike || onToggleFavorite) && (
               <div className="card__marks">
@@ -517,141 +539,7 @@ export function PhotoGrid({
               </button>
             )}
           </figure>
-        ))}
-      </div>
-
-      {zoomedLive && (
-        <PhotoLightbox
-          tile={zoomedLive}
-          onClose={() => setZoomed(null)}
-          onOpenSimilar={setZoomed}
-          onToggleLike={onToggleLike && ((t) => {
-            onToggleLike(t)
-            // отмечаем сразу и локально: карточка в сетке обновится, только
-            // когда родитель перерисует tiles, а до этого клик по сердечку
-            // в лайтбоксе видел бы старое значение и слал бы одно и то же
-            // действие раз за разом (баг, который это чинит)
-            setZoomed((z) => (z && z.photoId === t.photoId && z.databaseId === t.databaseId
-              ? { ...z, liked: !z.liked } : z))
-          })}
-          onToggleFavorite={onToggleFavorite && ((t) => {
-            onToggleFavorite(t)
-            setZoomed((z) => (z && z.photoId === t.photoId && z.databaseId === t.databaseId
-              ? { ...z, favorited: !z.favorited } : z))
-          })}
-        />
-      )}
-    </>
-  )
-}
-
-/**
- * Открытая целиком фотография вместе с похожими — «зашёл в снимок, увидел
- * похожие» (сценарий Pinterest). Похожие подгружаются лениво при открытии:
- * они не нужны, пока человек не открыл конкретный снимок. Открытие снимка
- * также логируется (api.viewPhoto) — это один из сигналов персональной ленты.
- */
-function PhotoLightbox({
-  tile,
-  onClose,
-  onOpenSimilar,
-  onToggleLike,
-  onToggleFavorite,
-}: {
-  tile: Tile
-  onClose: () => void
-  onOpenSimilar: (tile: Tile) => void
-  onToggleLike?: (tile: Tile) => void
-  onToggleFavorite?: (tile: Tile) => void
-}) {
-  const [similar, setSimilar] = useState<Tile[] | null>(null)
-
-  useEffect(() => {
-    let alive = true
-    setSimilar(null)
-    api.viewPhoto(tile.databaseId, tile.photoId).catch(() => undefined)
-    api
-      .similar(tile.databaseId, tile.photoId)
-      .then((result) => {
-        if (!alive) return
-        setSimilar(
-          result.results.map((hit) => ({
-            photoId: hit.photo_id,
-            databaseId: tile.databaseId,
-            thumbUrl: hit.thumb_url,
-            fileUrl: hit.file_url,
-            score: hit.score,
-            caption: hit.caption,
-            liked: hit.liked,
-            favorited: hit.favorited,
-            aiGenerated: hit.ai_generated,
-          })),
-        )
-      })
-      .catch(() => alive && setSimilar([]))
-    return () => {
-      alive = false
-    }
-  }, [tile.databaseId, tile.photoId])
-
-  return (
-    <div className="lightbox" role="dialog" aria-modal="true">
-      <button type="button" className="lightbox__scrim" onClick={onClose} aria-label="Закрыть" />
-      <div className="lightbox__panel">
-        <button type="button" className="lightbox__close" onClick={onClose} aria-label="Закрыть">
-          ×
-        </button>
-        <img className="lightbox__image" src={tile.fileUrl} alt="" />
-
-        {(onToggleLike || onToggleFavorite) && (
-          <div className="lightbox__marks">
-            {onToggleLike && (
-              <button
-                type="button"
-                className="card__mark"
-                data-active={Boolean(tile.liked)}
-                aria-label={tile.liked ? 'Убрать лайк' : 'Поставить лайк'}
-                onClick={() => onToggleLike(tile)}
-              >
-                {tile.liked ? '♥' : '♡'}
-              </button>
-            )}
-            {onToggleFavorite && (
-              <button
-                type="button"
-                className="card__mark"
-                data-active={Boolean(tile.favorited)}
-                aria-label={tile.favorited ? 'Убрать из избранного' : 'В избранное'}
-                onClick={() => onToggleFavorite(tile)}
-              >
-                {tile.favorited ? '★' : '☆'}
-              </button>
-            )}
-          </div>
-        )}
-
-        <div className="lightbox__similar">
-          <p className="eyebrow">Похожие</p>
-          {similar === null ? (
-            <p className="note">Ищем похожие…</p>
-          ) : similar.length === 0 ? (
-            <p className="note">Похожих не нашлось</p>
-          ) : (
-            <div className="lightbox__similar-row">
-              {similar.map((hit) => (
-                <button
-                  key={hit.photoId}
-                  type="button"
-                  className="lightbox__similar-item"
-                  onClick={() => onOpenSimilar(hit)}
-                >
-                  <img src={hit.thumbUrl} alt="" loading="lazy" />
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
+      ))}
     </div>
   )
 }

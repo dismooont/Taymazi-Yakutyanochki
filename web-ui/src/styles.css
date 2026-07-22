@@ -1,67 +1,54 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto+Condensed:wght@700&family=Roboto+Mono:wght@400;500&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Roboto+Condensed:wght@700&family=Roboto+Mono:wght@400;500&display=swap');
 
 /*
-  Оформление: тёмный сланец плюс янтарь — безопасный свет фотолаборатории.
-  Тёмный фон здесь не мода, а функция: снимки на нейтральном тёмном читаются лучше.
-  Есть и светлая тема (@media prefers-color-scheme): те же роли, но панели светлеют,
-  а янтарь как ТЕКСТ темнеет до --signal-text, иначе он нечитаем на белом.
+  Оформление: светлая палитра поверх саха-акцента (лёд/полярное небо), в духе
+  Pinterest — белый холст, чтобы снимки были главным, крупные скругления,
+  мягкие тени вместо рамок, пилюли вместо прямоугольных кнопок. Раньше акцент
+  был узкой лентой в шапке; теперь это основной цвет действия (--signal),
+  сменивший янтарь.
 
-  Янтарь несёт смысл «важно/выбрано»: близость результата, главное действие, активная
-  вкладка. За заливку отвечает --signal, за текст — --signal-text. Разделение нужно
-  ровно из-за светлой темы: янтарная заливка на обеих читается, янтарный текст — нет.
+  Тема одна и безусловная — без автовыбора по системной настройке. Раньше
+  тёмная тема была умолчанием само по себе (не зависела от ОС), и переход
+  на светлую с той же логикой «умолчание + системный override» означал бы,
+  что у любого, чья ОС просит тёмную, светлая палитра тут же перекрывалась
+  бы обратно — то есть именно то, от чего просили уйти, вернулось бы само.
 */
 
 :root {
-  color-scheme: dark light;
+  color-scheme: light;
 
-  --void: #0f151b;
-  --panel: #182029;
-  --panel-hi: #202b36;
-  --rule: #2b3844;
-  --text: #e7eef4;
-  --muted: #90a3b4;
+  --void: #f5f6f8;       /* фон страницы — чуть холоднее панелей, чтобы карточки на нём приподнимались */
+  --panel: #ffffff;
+  --panel-hi: #eef7fb;   /* лёгкий ледяной тон при наведении/выборе */
+  --rule: #e2e6ea;
+  --text: #14181c;
+  --muted: #6b7684;
 
-  --signal: #f0b429;       /* заливки: полоса близости, primary-кнопка, подчёркивание вкладки */
-  --signal-hi: #f7c55e;    /* наведение */
-  --signal-press: #d89a1f; /* нажатие */
-  --signal-text: #f0b429;  /* янтарь как текст (в светлой теме темнеет) */
-  --on-signal: #1a1206;    /* текст на янтарной заливке */
+  --signal: #2f9bd6;       /* саха-лёд как основной цвет действия: заливки, активная вкладка, полоса близости */
+  --signal-hi: #4babe0;    /* наведение */
+  --signal-press: #227ead; /* нажатие */
+  --signal-text: #1d7fb3;  /* тот же тон, затемнён для контраста как текст на белом */
+  --on-signal: #ffffff;    /* текст на синей заливке */
 
-  --danger: #e5605f;
-  --danger-solid: #c1443f; /* сплошная разрушительная кнопка */
-  --danger-text: #e5605f;  /* красный как текст (в светлой теме темнеет) */
+  --danger: #e5484d;
+  --danger-solid: #cf3237;
+  --danger-text: #cf3237;
   --on-danger: #ffffff;
 
   --display: 'Roboto Condensed', 'Arial Narrow', 'Segoe UI', system-ui, sans-serif;
   --body: 'Inter', system-ui, 'Segoe UI', Roboto, sans-serif;
   --mono: 'Roboto Mono', ui-monospace, 'Cascadia Mono', Consolas, monospace;
 
-  --gap: 20px;
-  --radius: 3px;
+  --gap: 16px;
+  --radius: 12px;      /* поля, кнопки, мелкие элементы */
+  --radius-lg: 20px;    /* карточки-«пины», крупные панели */
+  --radius-pill: 999px; /* навигация, аватар, поисковая строка */
 
-  /*
-    Акцент «Якутия» — узкая орнаментальная лента (топбар, вход), поверх
-    основной тёмно-сланцевой темы, а не вместо неё. Цвета — лёд/полярное небо
-    и белый, тот же дуэт, что на флаге и в серебряной чеканке саха; янтарь
-    (--signal) остаётся единственным цветом действия, чтобы не спорить с ним.
-  */
-  --sakha-ice: #5fb8e0;
-  --sakha-ice-dim: #2e5a70;
-  --sakha-snow: #eaf6fb;
-}
-
-@media (prefers-color-scheme: light) {
-  :root {
-    --void: #eef1f4;
-    --panel: #ffffff;
-    --panel-hi: #e3e8ec;
-    --rule: #c7d0d6;
-    --text: #101820;
-    --muted: #4b5a66;
-    --signal-text: #8a5a00;
-    --danger-text: #a6342e;
-    --sakha-ice-dim: #bfe4f2;
-  }
+  /* Саха-акцент: узкая ледово-снежная лента (шапка, экран входа) — то же, что
+     и раньше, только теперь это ОДИН из двух цветов темы, а не единственный. */
+  --sakha-ice: #2f9bd6;
+  --sakha-ice-dim: #cdeaf6;
+  --sakha-snow: #ffffff;
 }
 
 *,
@@ -84,6 +71,13 @@ body {
   font-size: 15px;
   line-height: 1.5;
   -webkit-font-smoothing: antialiased;
+  position: relative;
+  overflow-x: hidden; /* мамонты в углах экрана не должны давать горизонтальный скролл */
+}
+
+.shell {
+  position: relative;
+  z-index: 1;
 }
 
 :focus-visible {
@@ -106,18 +100,21 @@ body {
   font-family: var(--display);
   font-size: 12px;
   font-weight: 700;
-  letter-spacing: 0.22em;
+  letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--muted);
 }
 
 .title {
-  font-family: var(--display);
-  font-size: clamp(28px, 4vw, 44px);
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  line-height: 1.05;
+  font-family: var(--body);
+  font-size: clamp(26px, 4vw, 40px);
+  font-weight: 800;
+  letter-spacing: -0.01em;
+  line-height: 1.08;
   margin: 0;
+  /* заголовок всегда сильным цветом текста, а не приглушённым, унаследованным
+     от контейнера-обёртки — иначе на тёмной теме он читается блёкло */
+  color: var(--text);
 }
 
 .mono {
@@ -138,16 +135,18 @@ body {
   position: relative;
   display: flex;
   align-items: center;
-  gap: 16px;
-  padding: 14px clamp(16px, 4vw, 40px);
-  border-bottom: 1px solid var(--rule);
+  gap: 20px;
+  padding: 12px clamp(16px, 4vw, 40px);
   background: var(--panel);
+  border-bottom: 1px solid var(--rule);
 }
 
 /*
-  Орнаментальная лента — лёд/снег по краю топбара. Тот же приём — ::before/
-  ::after с repeating-linear-gradient — переиспользуется на экране входа
-  (.sakha-band), чтобы акцент не выглядел случайной деталью в одном месте.
+  Полярное сияние вдоль нижней кромки топбара: тонкая живая лента вместо
+  прежней статичной ледяной штриховки. Градиент вдвое шире полосы и медленно
+  ползёт вбок (aurora-drift) — цвета северного сияния (зелёный→бирюза→синий→
+  фиолет) перетекают друг в друга. Один и тот же приём — на экране входа
+  (.sakha-band), чтобы якутский мотив читался как система, а не случайность.
 */
 .topbar::after {
   content: '';
@@ -156,28 +155,49 @@ body {
   right: 0;
   bottom: -3px;
   height: 3px;
-  background: repeating-linear-gradient(
-    45deg,
-    var(--sakha-ice) 0 8px,
-    var(--sakha-snow) 8px 16px
+  background: linear-gradient(
+    90deg,
+    #3ddc97, #2f9bd6, #6a5acd, #2f9bd6, #3ddc97, #2f9bd6, #6a5acd
   );
+  background-size: 200% 100%;
+  animation: aurora-drift 14s linear infinite;
+  opacity: 0.85;
 }
 
 .sakha-band {
   height: 4px;
-  background: repeating-linear-gradient(
-    45deg,
-    var(--sakha-ice) 0 8px,
-    var(--sakha-snow) 8px 16px
+  border-radius: var(--radius-pill);
+  background: linear-gradient(
+    90deg,
+    #3ddc97, #2f9bd6, #6a5acd, #2f9bd6, #3ddc97, #2f9bd6, #6a5acd
   );
+  background-size: 200% 100%;
+  animation: aurora-drift 14s linear infinite;
+}
+
+@keyframes aurora-drift {
+  from { background-position: 0% 50%; }
+  to { background-position: 200% 50%; }
 }
 
 .topbar__mark {
-  font-family: var(--display);
-  font-weight: 700;
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
-  font-size: 13px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--body);
+  font-weight: 800;
+  font-size: 16px;
+  letter-spacing: -0.01em;
+  color: var(--text);
+  text-decoration: none;
+  flex-shrink: 0;
+}
+
+/* Знак-мамонт вместо прежней точки: тот же силуэт, что и на экране входа,
+   в фирменном синем — маленький якутский маркер в каждой шапке. */
+.topbar__mark-mammoth {
+  color: var(--signal);
+  flex-shrink: 0;
 }
 
 .topbar__spacer {
@@ -187,29 +207,46 @@ body {
 .topbar__nav {
   display: flex;
   gap: 4px;
+  background: var(--void);
+  padding: 4px;
+  border-radius: var(--radius-pill);
 }
 
 .topbar__link {
-  padding: 6px 12px;
-  border-radius: 2px;
+  padding: 8px 16px;
+  border-radius: var(--radius-pill);
   color: var(--muted);
   text-decoration: none;
-  font-size: 13px;
+  font-size: 14px;
+  font-weight: 600;
 }
 .topbar__link:hover {
   color: var(--text);
 }
 .topbar__link.active {
-  color: var(--signal-text);
-  background: var(--panel-hi);
+  color: var(--on-signal);
+  background: var(--signal);
+}
+
+.topbar__logout {
+  font-size: 13px;
+}
+
+.topbar__profile {
+  display: flex;
+  border-radius: 50%;
+  transition: box-shadow 0.15s ease;
+}
+.topbar__profile:hover {
+  box-shadow: 0 0 0 3px var(--sakha-ice-dim);
 }
 
 .page {
   flex: 1;
   width: 100%;
-  max-width: 1180px;
+  max-width: 1320px;
   margin: 0 auto;
-  padding: clamp(24px, 5vw, 56px) clamp(16px, 4vw, 40px) 80px;
+  padding: clamp(20px, 4vw, 40px) clamp(16px, 4vw, 40px) 80px;
 }
 
 .stack {
@@ -225,20 +262,78 @@ body {
   flex-wrap: wrap;
 }
 
+/* --- аватар ------------------------------------------------------------ */
+
+.avatar {
+  border-radius: 50%;
+  object-fit: cover;
+  display: block;
+  flex-shrink: 0;
+}
+
+.avatar--fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--signal);
+  color: var(--on-signal);
+  font-family: var(--body);
+  font-weight: 700;
+}
+
+.profile-head {
+  align-items: center;
+  gap: 24px;
+}
+
+.profile-head__avatar {
+  position: relative;
+  width: 96px;
+  height: 96px;
+  border-radius: 50%;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.profile-head__avatar-edit {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: rgba(20, 24, 28, 0.55);
+  color: #fff;
+  font-family: var(--display);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.profile-head__avatar:hover .profile-head__avatar-edit,
+.profile-head__avatar:focus-visible .profile-head__avatar-edit {
+  opacity: 1;
+}
+
 /* --- элементы управления -------------------------------------------- */
 
 .btn {
-  font-family: var(--display);
+  font-family: var(--body);
   font-size: 14px;
-  font-weight: 700;
+  font-weight: 600;
   letter-spacing: 0.01em;
   color: var(--text);
-  background: var(--panel);
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
-  padding: 12px 20px;
+  background: var(--void);
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  padding: 11px 20px;
   cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease, transform 0.1s ease;
   text-decoration: none;
   display: inline-flex;
   align-items: center;
@@ -248,7 +343,10 @@ body {
 
 .btn:hover:not(:disabled) {
   background: var(--panel-hi);
-  border-color: var(--rule);
+}
+
+.btn:active:not(:disabled) {
+  transform: scale(0.98);
 }
 
 .btn:disabled {
@@ -256,29 +354,24 @@ body {
   cursor: not-allowed;
 }
 
-/* Главное действие — единственная янтарная заливка среди кнопок. Текст тёмный
-   (--on-signal): на янтаре светлый нечитаем. */
+/* Главное действие — единственная заливка сплошным акцентом среди кнопок. */
 .btn--primary {
   background: var(--signal);
   color: var(--on-signal);
-  border-color: var(--signal);
 }
 
 .btn--primary:hover:not(:disabled) {
   background: var(--signal-hi);
-  border-color: var(--signal-hi);
 }
 
 .btn--primary:active:not(:disabled) {
   background: var(--signal-press);
-  border-color: var(--signal-press);
 }
 
 .btn--quiet {
   background: transparent;
-  border-color: transparent;
   color: var(--muted);
-  padding-inline: 8px;
+  padding-inline: 10px;
 }
 
 .btn--quiet:hover:not(:disabled) {
@@ -290,20 +383,36 @@ body {
    кричит сплошной заливкой. Сплошная кнопка (--danger-solid/--on-danger) заложена
    в токенах на случай отдельного подтверждения удаления. */
 .btn--danger:hover:not(:disabled) {
-  border-color: var(--danger-text);
   color: var(--danger-text);
-  background: transparent;
+  background: #fdecec;
+}
+
+/* Лайк/избранное как обычная кнопка (страница фото, pages/Photo.tsx) — в
+   отличие от .card__mark в сетке, здесь не нужно прятаться до наведения:
+   кнопка одна, а не двенадцать на экране. */
+.btn[data-active='true'] {
+  background: var(--danger-solid);
+  border-color: var(--danger-solid);
+  color: var(--on-danger);
+}
+.btn[data-active='true']:hover:not(:disabled) {
+  background: var(--danger-solid);
 }
 
 .field {
   width: 100%;
-  background: var(--panel);
+  background: var(--void);
   color: var(--text);
-  border: 1px solid var(--rule);
+  border: 1px solid transparent;
   border-radius: var(--radius);
-  padding: 10px 16px;
+  padding: 11px 16px;
   font-family: var(--body);
   font-size: 15px;
+}
+
+.field:focus {
+  background: var(--panel);
+  border-color: var(--signal);
 }
 
 .field::placeholder {
@@ -335,13 +444,244 @@ body {
 
 /* --- вход ----------------------------------------------------------- */
 
-.auth {
-  max-width: 380px;
-  margin: clamp(40px, 12vh, 120px) auto;
-  padding-inline: 20px;
+.auth-page {
+  position: relative;
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: #0a1230;
 }
 
-/* Вкладки-подчёркивание: активная помечена янтарной чертой снизу, а не заливкой.
+/* =====================================================================
+   Якутская ночь — анимированная сцена на экране входа (AuroraScene.tsx):
+   ночное небо, звёзды, полярное сияние, снег, горы и силуэт мамонта.
+   ===================================================================== */
+
+.scene {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.scene__sky {
+  position: absolute;
+  inset: 0;
+  /* глубокое северное небо: фиолет у горизонта → почти чёрная синь вверху */
+  background:
+    radial-gradient(120% 80% at 50% 100%, #1b2a5e 0%, #101a44 40%, #0a1230 70%, #070c22 100%);
+}
+
+/*
+  Плавный перелив по всему небу: очень широкий многоцветный градиент (цвета
+  северного сияния) едет по горизонтали бесконечно и линейно — без вспышек и
+  скачков прозрачности, поэтому глаз читает это как перетекание, а не мигание.
+*/
+.scene__flow {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    100deg,
+    transparent 0%,
+    rgba(61, 220, 151, 0.16) 18%,
+    rgba(47, 208, 214, 0.20) 34%,
+    rgba(47, 155, 214, 0.16) 50%,
+    rgba(122, 108, 255, 0.20) 66%,
+    rgba(61, 220, 151, 0.16) 82%,
+    transparent 100%
+  );
+  background-size: 220% 100%;
+  mix-blend-mode: screen;
+  animation: sky-flow 26s linear infinite;
+}
+
+@keyframes sky-flow {
+  from { background-position: 0% 50%; }
+  to { background-position: 220% 50%; }
+}
+
+/* луна — мягкое холодное свечение в верхнем правом углу, даёт свету источник */
+.scene__moon {
+  position: absolute;
+  top: 9%;
+  right: 12%;
+  width: 84px;
+  height: 84px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 38%, #ffffff, #dbe7ff 45%, rgba(219, 231, 255, 0) 72%);
+  filter: blur(0.5px);
+  opacity: 0.9;
+  animation: moon-glow 9s ease-in-out infinite;
+}
+
+@keyframes moon-glow {
+  0%, 100% { filter: blur(0.5px) brightness(1); }
+  50% { filter: blur(0.5px) brightness(1.12); }
+}
+
+/* --- звёзды: тихое медленное «дыхание», у каждой свой период (задаётся в JS) --- */
+.scene__star {
+  position: absolute;
+  border-radius: 50%;
+  background: #eaf2ff;
+  opacity: 0.75;
+  box-shadow: 0 0 4px rgba(234, 242, 255, 0.6);
+  animation-name: star-breathe;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+
+@keyframes star-breathe {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 0.95; }
+}
+
+/*
+  Полярное сияние: размытые вертикальные занавесы. Колышутся ОЧЕНЬ медленно и
+  без изменения прозрачности (раньше opacity 0.5↔0.75 читалось как мерцание) —
+  меняется только форма/наклон, плавно.
+*/
+.scene__aurora {
+  position: absolute;
+  top: -20%;
+  height: 95%;
+  width: 70%;
+  filter: blur(46px);
+  mix-blend-mode: screen;
+  transform-origin: center bottom;
+  will-change: transform;
+}
+
+.scene__aurora--1 {
+  left: -8%;
+  opacity: 0.5;
+  background: linear-gradient(180deg, transparent, #3ddc97 55%, transparent);
+  animation: aurora-sway 24s ease-in-out infinite;
+}
+
+.scene__aurora--2 {
+  left: 20%;
+  width: 55%;
+  opacity: 0.4;
+  background: linear-gradient(180deg, transparent, #2fd0d6 50%, transparent);
+  animation: aurora-sway 30s ease-in-out infinite reverse;
+}
+
+.scene__aurora--3 {
+  left: 46%;
+  width: 60%;
+  opacity: 0.38;
+  background: linear-gradient(180deg, transparent, #7a6cff 55%, transparent);
+  animation: aurora-sway 27s ease-in-out infinite;
+}
+
+.scene__aurora--4 {
+  left: 68%;
+  width: 48%;
+  opacity: 0.34;
+  background: linear-gradient(180deg, transparent, #4fb0e6 52%, transparent);
+  animation: aurora-sway 33s ease-in-out infinite reverse;
+}
+
+@keyframes aurora-sway {
+  0%, 100% { transform: translateX(-5%) scaleY(1) skewX(-7deg); }
+  50% { transform: translateX(6%) scaleY(1.14) skewX(7deg); }
+}
+
+/* --- снег --- */
+.scene__flake {
+  position: absolute;
+  top: -6%;
+  border-radius: 50%;
+  background: #fff;
+  opacity: 0.85;
+  animation-name: snowfall;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+
+@keyframes snowfall {
+  0% { transform: translate(0, -10vh); opacity: 0; }
+  10% { opacity: 0.85; }
+  90% { opacity: 0.85; }
+  100% { transform: translate(var(--drift, 0), 105vh); opacity: 0; }
+}
+
+/* --- горы --- */
+.scene__ridges {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  width: 100%;
+  height: 42%;
+}
+
+.scene__ridge--far { fill: #223163; opacity: 0.85; }
+.scene__ridge--near { fill: #131d47; }
+.scene__snowcap { fill: #e9f1ff; opacity: 0.9; }
+
+/* --- мамонт --- */
+/* Мамонт стоит слева, в стороне от центральной карточки входа, чтобы его было
+   видно целиком, а не за белой формой. На узких экранах карточка занимает всю
+   ширину и мамонт уходит ей за спину — там сцена и так только фон. */
+.scene__mammoth {
+  position: absolute;
+  bottom: 7%;
+  left: 7%;
+  width: clamp(120px, 17vw, 200px);
+  height: auto;
+  color: #0b1330;
+  animation: mammoth-bob 6s ease-in-out infinite;
+}
+
+.scene__mammoth-body {
+  fill: currentColor;
+  stroke: #2a3766;
+  stroke-width: 1.5;
+}
+
+@keyframes mammoth-bob {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-5px); }
+}
+
+/* низ сцены гасим в цвет карточки-подложки, чтобы граница не резала глаз */
+.scene__fade {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 30%;
+  background: linear-gradient(180deg, transparent, rgba(7, 12, 34, 0.6));
+}
+
+/*
+  По просьбе — экран входа без движения: сцена остаётся как красивый статичный
+  фон (небо, сияние, звёзды, горы, луна, мамонт), но ничего не анимируется.
+  Заодно гасим ленту-градиент над формой (.sakha-band). Снежинки при этом
+  замирают за верхним краем и просто не видны — отдельно убирать их не нужно.
+*/
+.auth-page .scene *,
+.auth-page .sakha-band {
+  animation: none !important;
+}
+
+.auth {
+  position: relative;
+  z-index: 1;
+  max-width: 380px;
+  width: 100%;
+  margin: clamp(24px, 8vh, 80px) 20px;
+  padding: 32px 28px;
+  background: var(--panel);
+  border-radius: var(--radius-lg);
+  box-shadow: 0 24px 60px rgba(20, 24, 28, 0.14);
+}
+
+/* Вкладки-подчёркивание: активная помечена акцентной чертой снизу, а не заливкой.
    Так переключатель не спорит за внимание с содержимым под ним. */
 .tabs {
   display: flex;
@@ -350,7 +690,7 @@ body {
 }
 
 .tabs__item {
-  font-family: var(--display);
+  font-family: var(--body);
   font-size: 14px;
   font-weight: 700;
   letter-spacing: 0.01em;
@@ -391,17 +731,18 @@ body {
   grid-template-columns: 1fr auto;
   gap: 12px 20px;
   align-items: center;
-  padding: 18px 20px;
+  padding: 18px 22px;
   background: var(--panel);
   border: 1px solid var(--rule);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   text-decoration: none;
   color: inherit;
+  transition: box-shadow 0.15s ease, transform 0.15s ease;
 }
 
 .entry:hover {
-  border-color: var(--muted);
-  background: var(--panel-hi);
+  box-shadow: 0 8px 20px rgba(20, 24, 28, 0.08);
+  transform: translateY(-1px);
 }
 
 .entry__main {
@@ -420,9 +761,9 @@ body {
   width: 44px;
   height: 44px;
   object-fit: cover;
-  border: 1px solid var(--void);
-  border-radius: 2px;
-  margin-left: -10px;
+  border: 2px solid var(--panel);
+  border-radius: 50%;
+  margin-left: -14px;
 }
 
 .entry__preview img:first-child {
@@ -430,25 +771,25 @@ body {
 }
 
 .entry__name {
-  font-family: var(--display);
-  font-size: 22px;
+  font-family: var(--body);
+  font-size: 20px;
   font-weight: 700;
-  letter-spacing: 0.02em;
+  letter-spacing: -0.01em;
   margin: 0;
 }
 
 .tag {
   display: inline-block;
   margin-left: 10px;
-  padding: 2px 8px;
-  border: 1px solid var(--rule);
-  border-radius: 2px;
+  padding: 2px 10px;
+  background: var(--sakha-ice-dim);
+  border-radius: var(--radius-pill);
   font-family: var(--display);
   font-size: 11px;
   font-weight: 700;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.1em;
   text-transform: uppercase;
-  color: var(--muted);
+  color: var(--signal-text);
   vertical-align: middle;
 }
 
@@ -469,11 +810,12 @@ body {
   text-align: left;
   padding: 26px 24px;
   background: var(--panel);
-  border: 1px dashed var(--rule);
-  border-radius: var(--radius);
+  border: 1.5px dashed var(--rule);
+  border-radius: var(--radius-lg);
   color: inherit;
   cursor: pointer;
   font: inherit;
+  transition: border-color 0.15s ease, background 0.15s ease;
 }
 
 .starter:hover,
@@ -483,12 +825,50 @@ body {
 }
 
 .starter__title {
-  font-family: var(--display);
-  font-size: 20px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
+  font-family: var(--body);
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
   margin: 10px 0 6px;
+}
+
+/* --- страница фото (pages/Photo.tsx) ---------------------------------- */
+
+.photo-page {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 260px;
+  gap: 24px;
+  align-items: start;
+}
+
+.photo-page__frame {
+  position: relative;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--panel);
+  box-shadow: 0 1px 3px rgba(20, 24, 28, 0.08);
+}
+
+.photo-page__image {
+  display: block;
+  width: 100%;
+  max-height: 78vh;
+  object-fit: contain;
+  background: var(--void);
+}
+
+.photo-page__side {
+  position: sticky;
+  top: 88px;
+}
+
+@media (max-width: 780px) {
+  .photo-page {
+    grid-template-columns: 1fr;
+  }
+  .photo-page__side {
+    position: static;
+  }
 }
 
 /* --- рабочая область ------------------------------------------------- */
@@ -500,7 +880,6 @@ body {
   gap: 20px;
   flex-wrap: wrap;
   padding-bottom: 18px;
-  border-bottom: 1px solid var(--rule);
 }
 
 /*
@@ -510,9 +889,9 @@ body {
 */
 .console {
   border: 1px solid var(--rule);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   background: var(--panel);
-  padding: 16px;
+  padding: 18px 20px;
 }
 
 .console__row {
@@ -524,6 +903,8 @@ body {
 .console__row .field {
   flex: 1;
   min-width: 200px;
+  border-radius: var(--radius-pill);
+  padding-left: 20px;
 }
 
 /* крупная зона приёма: перетаскивание, выбор файлом, вставка из буфера */
@@ -536,8 +917,8 @@ body {
   width: 100%;
   padding: 22px 20px;
   background: var(--panel);
-  border: 1px dashed var(--rule);
-  border-radius: var(--radius);
+  border: 1.5px dashed var(--rule);
+  border-radius: var(--radius-lg);
   color: inherit;
   cursor: pointer;
   font: inherit;
@@ -566,6 +947,8 @@ body {
 /* компактная зона перетаскивания: кнопка, которая принимает и брошенный файл */
 .drop {
   border-style: dashed;
+  border-width: 1.5px;
+  border-color: var(--rule);
 }
 
 .drop[data-over='true'] {
@@ -578,7 +961,9 @@ body {
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  margin-top: 10px;
+  margin-top: 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--rule);
   color: var(--muted);
   font-size: 14px;
 }
@@ -598,24 +983,36 @@ body {
   color: var(--signal-text);
 }
 
+/*
+  Masonry в чистом CSS: колонки, а не grid — карточки текут по высоте
+  столбца, как в Pinterest. Превью (core/store.py, THUMB_SIZE) сохраняют
+  реальные пропорции снимка, PIL .thumbnail() не кропает в квадрат, поэтому
+  раскладка колонками показывает кадр таким, какой он есть, а не квадратом.
+*/
 .grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
-  gap: 16px;
+  columns: 5 220px;
+  column-gap: var(--gap);
 }
 
 .card {
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
+  break-inside: avoid;
+  margin-bottom: var(--gap);
+  border-radius: var(--radius-lg);
   background: var(--panel);
   overflow: hidden;
   position: relative;
+  box-shadow: 0 1px 3px rgba(20, 24, 28, 0.08);
+  transition: box-shadow 0.18s ease, transform 0.18s ease;
+}
+
+.card:hover {
+  box-shadow: 0 12px 28px rgba(20, 24, 28, 0.16);
+  transform: translateY(-3px);
 }
 
 .card__frame {
   display: block;
   position: relative;
-  aspect-ratio: 1;
   width: 100%;
   background: var(--void);
   border: 0;
@@ -625,13 +1022,12 @@ body {
 
 .card__frame img {
   width: 100%;
-  height: 100%;
-  object-fit: cover;
+  height: auto;
   display: block;
 }
 
 .card__foot {
-  padding: 8px 10px 10px;
+  padding: 10px 12px 10px;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -646,13 +1042,14 @@ body {
 }
 
 /*
-  Полоса близости — единственное место, где появляется янтарь. Длина линии равна
-  близости результата относительно первого места, рядом стоит сырое значение
-  косинуса. Показывать «97 % совпадения» было бы враньём: у CLIP осмысленные
-  значения лежат около 0,2–0,3, и это свойство модели, а не недостаток выдачи.
+  Полоса близости — единственное место, где заливка идёт на всю ширину.
+  Длина линии равна близости результата относительно первого места, рядом
+  стоит сырое значение косинуса. Показывать «97 % совпадения» было бы враньём:
+  у CLIP осмысленные значения лежат около 0,2–0,3, и это свойство модели,
+  а не недостаток выдачи.
 */
 .proximity {
-  height: 2px;
+  height: 3px;
   background: var(--rule);
 }
 
@@ -672,7 +1069,7 @@ body {
    высоте, а длинные подписи вытеснят сами снимки. */
 .card__caption {
   margin: 0;
-  padding: 0 10px 10px;
+  padding: 0 12px 12px;
   font-size: 12px;
   line-height: 1.35;
   color: var(--muted);
@@ -699,7 +1096,7 @@ body {
 
 /* «+ подпись» у снимка без подписи — ненавязчиво, проявляется при наведении. */
 .card__caption-add {
-  margin: 0 10px 10px;
+  margin: 0 12px 12px;
   padding: 2px 0;
   background: none;
   border: none;
@@ -721,7 +1118,7 @@ body {
   display: flex;
   flex-direction: column;
   gap: 6px;
-  padding: 0 10px 10px;
+  padding: 0 12px 12px;
 }
 .card__caption-input {
   width: 100%;
@@ -732,18 +1129,19 @@ body {
 
 .card__remove {
   position: absolute;
-  top: 8px;
-  right: 8px;
-  width: 28px;
-  height: 28px;
-  border-radius: 2px;
-  border: 1px solid var(--rule);
-  background: rgba(15, 21, 27, 0.85);
-  color: var(--muted);
+  top: 10px;
+  right: 10px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 0;
+  background: rgba(20, 24, 28, 0.6);
+  color: #fff;
   cursor: pointer;
   font-size: 16px;
   line-height: 1;
   opacity: 0;
+  backdrop-filter: blur(2px);
 }
 
 .card:hover .card__remove,
@@ -752,72 +1150,84 @@ body {
 }
 
 .card__remove:hover {
-  color: var(--danger-text);
-  border-color: var(--danger-text);
+  background: var(--danger-solid);
 }
 
-/* Лайк и избранное — видны всегда, а не только при наведении: это состояние,
-   а не действие, и его нужно узнавать с первого взгляда на сетку. */
+/*
+  Лайк и избранное — в стиле Pinterest: проявляются при наведении на карточку,
+  но активная отметка (уже лайкнуто/в избранном) видна всегда — это состояние,
+  а не действие, и его нужно узнавать с первого взгляда, даже без наведения.
+*/
 .card__marks {
   position: absolute;
-  top: 8px;
-  left: 8px;
+  top: 10px;
+  left: 10px;
   display: flex;
-  gap: 4px;
+  gap: 6px;
 }
 
 .card__mark {
-  width: 26px;
-  height: 26px;
-  border-radius: 2px;
-  border: 1px solid var(--rule);
-  background: rgba(15, 21, 27, 0.85);
-  color: var(--muted);
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  border: 0;
+  background: rgba(20, 24, 28, 0.55);
+  color: #fff;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1;
+  opacity: 0;
+  backdrop-filter: blur(2px);
+  transition: opacity 0.15s ease, background 0.15s ease, transform 0.1s ease;
+}
+
+.card:hover .card__mark,
+.card__mark:focus-visible,
+.card__mark[data-active='true'] {
+  opacity: 1;
 }
 
 .card__mark:hover {
-  border-color: var(--signal-text);
-  color: var(--signal-text);
+  transform: scale(1.08);
 }
 
 .card__mark[data-active='true'] {
-  color: var(--danger-text);
-  border-color: var(--danger-text);
+  background: var(--danger-solid);
 }
 
 /* Метка сгенерированного YandexART снимка — поверх превью, чтобы не спутать
    с найденным в базе кадром. */
 .card__badge {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  padding: 3px 8px;
-  background: rgba(15, 21, 27, 0.85);
-  color: var(--signal-text);
+  left: 10px;
+  bottom: 10px;
+  padding: 4px 10px;
+  border-radius: var(--radius-pill);
+  background: rgba(20, 24, 28, 0.65);
+  color: #fff;
   font-family: var(--display);
-  font-size: 11px;
-  letter-spacing: 0.02em;
-  text-align: center;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  backdrop-filter: blur(2px);
 }
 
 /* --- прогресс -------------------------------------------------------- */
 
 .job {
   border: 1px solid var(--rule);
-  border-left: 2px solid var(--signal);
-  border-radius: var(--radius);
+  border-radius: var(--radius-lg);
   background: var(--panel);
-  padding: 14px 16px;
+  padding: 14px 18px;
 }
 
 .job__bar {
-  height: 3px;
+  height: 4px;
+  border-radius: var(--radius-pill);
   background: var(--rule);
   margin-top: 10px;
+  overflow: hidden;
 }
 
 .job__fill {
@@ -826,106 +1236,162 @@ body {
   transition: width 0.3s ease;
 }
 
-/* --- пустые состояния и служебное ------------------------------------ */
+/* --- фильмы и музыка --------------------------------------------------- */
 
-.empty {
-  border: 1px dashed var(--rule);
-  border-radius: var(--radius);
-  padding: 48px 24px;
-  text-align: center;
-  color: var(--muted);
-}
-
-.lightbox {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 32px;
-  z-index: 10;
-}
-
-.lightbox__scrim {
-  position: absolute;
-  inset: 0;
-  background: rgba(8, 12, 16, 0.94);
-  border: 0;
-  cursor: zoom-out;
-}
-
-.lightbox__panel {
-  position: relative;
+.media-theme {
   display: flex;
   flex-direction: column;
-  align-items: center;
-  gap: 16px;
-  max-width: min(900px, 100%);
-  max-height: 100%;
-  overflow-y: auto;
+  gap: 14px;
 }
 
-.lightbox__image {
-  max-width: 100%;
-  max-height: 60vh;
-  object-fit: contain;
-  border-radius: var(--radius);
+.media-theme__title {
+  font-family: var(--display);
+  font-size: 20px;
+  font-weight: 700;
+  text-transform: capitalize;
+  margin: 0;
 }
 
-.lightbox__close {
-  position: absolute;
-  top: -8px;
-  right: -8px;
-  width: 32px;
-  height: 32px;
-  border-radius: 2px;
-  border: 1px solid var(--rule);
-  background: var(--panel);
-  color: var(--muted);
-  cursor: pointer;
-  font-size: 18px;
-  line-height: 1;
-}
-.lightbox__close:hover {
-  color: var(--danger-text);
-  border-color: var(--danger-text);
-}
-
-.lightbox__marks {
+/*
+  Отдельная панель на «Фильмы» и на «Музыку» внутри темы — раньше постеры,
+  треки и артисты шли одним потоком, и было непонятно, где заканчивается один
+  раздел и начинается другой.
+*/
+.media-block {
+  background: var(--panel-hi);
+  border-radius: var(--radius-lg);
+  padding: 16px;
   display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.media-block__title {
+  font-family: var(--display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin: 0;
+}
+
+.media-row {
+  display: flex;
+  gap: 14px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+}
+
+.media-card {
+  flex: 0 0 auto;
+  width: 150px;
+  color: inherit;
+  text-decoration: none;
+  border-radius: var(--radius-lg);
+  overflow: hidden;
+  background: var(--panel);
+  box-shadow: 0 8px 20px rgba(20, 24, 28, 0.08);
+  transition: transform 0.15s ease;
+}
+
+.media-card:hover {
+  transform: translateY(-3px);
+}
+
+.media-card__poster {
+  width: 150px;
+  height: 220px;
+  object-fit: cover;
+  display: block;
+  background: var(--panel-hi);
+}
+
+.media-card__poster--blank {
+  display: flex;
+}
+
+.media-card__title {
+  font-size: 13px;
+  font-weight: 700;
+  margin: 8px 10px 0;
+  line-height: 1.3;
+}
+
+.media-card__meta {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 2px 10px 10px;
+}
+
+.media-tracks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
   gap: 6px;
 }
 
-.lightbox__similar {
-  width: 100%;
-}
-
-.lightbox__similar-row {
+.media-tracks li {
   display: flex;
-  gap: 10px;
-  overflow-x: auto;
-  padding-bottom: 4px;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: var(--radius);
+  background: var(--panel);
 }
 
-.lightbox__similar-item {
+.media-tracks__name {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.media-tracks__artist {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.media-artist {
   flex: 0 0 auto;
   width: 96px;
-  height: 96px;
-  padding: 0;
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
-  overflow: hidden;
-  cursor: pointer;
-  background: var(--void);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+  font-size: 12px;
+  font-weight: 700;
 }
-.lightbox__similar-item:hover {
-  border-color: var(--signal);
-}
-.lightbox__similar-item img {
-  width: 100%;
-  height: 100%;
+
+.media-artist__image {
+  width: 80px;
+  height: 80px;
+  border-radius: var(--radius-pill);
   object-fit: cover;
-  display: block;
+  background: var(--panel);
+}
+
+/* Тот же приём, что и у аватара пользователя (.avatar--fallback): инициал на
+   цветном круге вместо картинки — вместо звезды-заглушки, которую для
+   отсутствующего фото отдаёт сам Last.fm (см. core/media.py). */
+.media-artist__image--fallback {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--signal);
+  color: var(--on-signal);
+  font-size: 28px;
+}
+
+/* --- пустые состояния и служебное ------------------------------------ */
+
+.empty {
+  border: 1.5px dashed var(--rule);
+  border-radius: var(--radius-lg);
+  padding: 48px 24px;
+  text-align: center;
+  color: var(--muted);
 }
 
 .skeleton {
@@ -944,12 +1410,19 @@ body {
   left: 50%;
   bottom: 24px;
   transform: translateX(-50%);
-  background: var(--panel-hi);
-  border: 1px solid var(--rule);
-  border-radius: var(--radius);
-  padding: 12px 18px;
+  background: var(--text);
+  color: var(--void);
+  border-radius: var(--radius-pill);
+  padding: 12px 22px;
   z-index: 20;
   max-width: min(520px, calc(100vw - 32px));
+  box-shadow: 0 8px 24px rgba(20, 24, 28, 0.25);
+}
+
+@media (max-width: 900px) {
+  .grid {
+    columns: 3 160px;
+  }
 }
 
 @media (max-width: 620px) {
@@ -961,10 +1434,26 @@ body {
     grid-template-columns: 1fr;
   }
 
-  /* на узком экране 190px дают одну колонку и снимки размером в пол-экрана —
-     для просмотра архива полезнее видеть их по два в ряд */
   .grid {
-    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+    columns: 2 130px;
+    column-gap: 10px;
+  }
+
+  .card {
+    margin-bottom: 10px;
+  }
+
+  .topbar {
     gap: 10px;
+    padding-inline: 12px;
+  }
+
+  .topbar__mark-text {
+    display: none; /* на узком экране остаётся только точка-лого — тексту не хватает места рядом с навигацией */
+  }
+
+  .topbar__link {
+    padding: 8px 10px;
+    font-size: 13px;
   }
 }
